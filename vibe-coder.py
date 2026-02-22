@@ -140,15 +140,19 @@ class Config:
         self.list_sessions = False
         self.cwd = os.getcwd()
 
-        # Paths
+        # Paths (primary: vibe-local, with backward compat for old vibe-coder dirs)
         if os.name == "nt":
             appdata = os.environ.get("LOCALAPPDATA",
                                      os.path.join(os.path.expanduser("~"), "AppData", "Local"))
-            self.config_dir = os.path.join(appdata, "vibe-coder")
-            self.state_dir = os.path.join(appdata, "vibe-coder")
+            self.config_dir = os.path.join(appdata, "vibe-local")
+            self.state_dir = os.path.join(appdata, "vibe-local")
+            self._old_config_dir = os.path.join(appdata, "vibe-coder")
+            self._old_state_dir = os.path.join(appdata, "vibe-coder")
         else:
-            self.config_dir = os.path.join(os.path.expanduser("~"), ".config", "vibe-coder")
-            self.state_dir = os.path.join(os.path.expanduser("~"), ".local", "state", "vibe-coder")
+            self.config_dir = os.path.join(os.path.expanduser("~"), ".config", "vibe-local")
+            self.state_dir = os.path.join(os.path.expanduser("~"), ".local", "state", "vibe-local")
+            self._old_config_dir = os.path.join(os.path.expanduser("~"), ".config", "vibe-coder")
+            self._old_state_dir = os.path.join(os.path.expanduser("~"), ".local", "state", "vibe-coder")
 
         self.config_file = os.path.join(self.config_dir, "config")
         self.permissions_file = os.path.join(self.config_dir, "permissions.json")
@@ -166,9 +170,9 @@ class Config:
         return self
 
     def _load_config_file(self):
-        # Also check vibe-local config (written by launcher/installer)
-        vibe_local_config = os.path.join(os.path.expanduser("~"), ".config", "vibe-local", "config")
-        for cfg_path in [vibe_local_config, self.config_file]:
+        # Check old vibe-coder config for backward compatibility, then current config
+        old_config = os.path.join(self._old_config_dir, "config")
+        for cfg_path in [old_config, self.config_file]:
             if not os.path.isfile(cfg_path):
                 continue
             # Security: skip symlinks (attacker could link to /etc/shadow)
@@ -221,16 +225,15 @@ class Config:
     def _load_env(self):
         if os.environ.get("OLLAMA_HOST"):
             self.ollama_host = os.environ["OLLAMA_HOST"]
-        # VIBE_LOCAL_MODEL is set by launcher, VIBE_CODER_MODEL is user override
-        # User override (VIBE_CODER_MODEL) takes priority, so load it second
-        if os.environ.get("VIBE_LOCAL_MODEL"):
-            self.model = os.environ["VIBE_LOCAL_MODEL"]
+        # VIBE_CODER_* are legacy env vars; VIBE_LOCAL_* take precedence (loaded second)
         if os.environ.get("VIBE_CODER_MODEL"):
             self.model = os.environ["VIBE_CODER_MODEL"]
-        if os.environ.get("VIBE_LOCAL_SIDECAR_MODEL"):
-            self.sidecar_model = os.environ["VIBE_LOCAL_SIDECAR_MODEL"]
+        if os.environ.get("VIBE_LOCAL_MODEL"):
+            self.model = os.environ["VIBE_LOCAL_MODEL"]
         if os.environ.get("VIBE_CODER_SIDECAR"):
             self.sidecar_model = os.environ["VIBE_CODER_SIDECAR"]
+        if os.environ.get("VIBE_LOCAL_SIDECAR_MODEL"):
+            self.sidecar_model = os.environ["VIBE_LOCAL_SIDECAR_MODEL"]
         if os.environ.get("VIBE_CODER_DEBUG") == "1" or os.environ.get("VIBE_LOCAL_DEBUG") == "1":
             self.debug = True
 
@@ -357,6 +360,24 @@ class Config:
                 print(f"  Try: sudo mkdir -p {d} && sudo chown $USER {d}", file=sys.stderr)
             except OSError as e:
                 print(f"Warning: Cannot create directory {d}: {e}", file=sys.stderr)
+        # Migrate old vibe-coder sessions to new vibe-local location
+        old_sessions = os.path.join(self._old_state_dir, "sessions")
+        if os.path.isdir(old_sessions) and not os.path.islink(self.sessions_dir):
+            try:
+                for name in os.listdir(old_sessions):
+                    src = os.path.join(old_sessions, name)
+                    dst = os.path.join(self.sessions_dir, name)
+                    if os.path.exists(src) and not os.path.exists(dst):
+                        shutil.copytree(src, dst) if os.path.isdir(src) else shutil.copy2(src, dst)
+            except (OSError, shutil.Error):
+                pass  # Best-effort migration
+        # Migrate old history file
+        old_history = os.path.join(self._old_state_dir, "history")
+        if os.path.isfile(old_history) and not os.path.isfile(self.history_file):
+            try:
+                shutil.copy2(old_history, self.history_file)
+            except (OSError, shutil.Error):
+                pass
 
 
 def _get_ram_gb():
@@ -397,7 +418,7 @@ def _get_ram_gb():
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# System Prompt (ported from proxy.py LOCAL_SYSTEM_PROMPT + enhancements)
+# System Prompt
 # ════════════════════════════════════════════════════════════════════════════════
 
 def _build_system_prompt(config):
@@ -1235,10 +1256,11 @@ def _is_protected_path(file_path):
         basename = os.path.basename(real)
         if basename in _PROTECTED_BASENAMES:
             return True
-        # Also check vibe-coder's own config directory
-        config_dir = os.path.join(os.path.expanduser("~"), ".config", "vibe-coder")
-        if real.startswith(os.path.realpath(config_dir)):
-            return True
+        # Check both vibe-local and legacy vibe-coder config directories
+        for dirname in ("vibe-local", "vibe-coder"):
+            config_dir = os.path.join(os.path.expanduser("~"), ".config", dirname)
+            if real.startswith(os.path.realpath(config_dir)):
+                return True
     except (OSError, ValueError):
         pass
     return False
@@ -1898,7 +1920,7 @@ class WebFetchTool(Tool):
 
 
 class WebSearchTool(Tool):
-    """Web search via DuckDuckGo HTML endpoint. Ported from proxy.py _ddg_search()."""
+    """Web search via DuckDuckGo HTML endpoint."""
     name = "WebSearch"
     description = "Search the web using DuckDuckGo. Returns titles, URLs, and snippets."
     parameters = {
@@ -2703,7 +2725,7 @@ class PermissionMgr:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# XML Tool Call Extraction (ported from proxy.py)
+# XML Tool Call Extraction
 # ════════════════════════════════════════════════════════════════════════════════
 
 def _try_parse_json_value(value):

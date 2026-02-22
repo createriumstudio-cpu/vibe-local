@@ -63,14 +63,14 @@ class TestConfig:
             cfg._load_env()
         assert cfg.ollama_host == "http://127.0.0.1:9999"
 
-    def test_load_env_vibe_coder_model_overrides_vibe_local(self):
+    def test_load_env_vibe_local_model_overrides_vibe_coder(self):
         cfg = vc.Config()
         with mock.patch.dict(os.environ, {
             "VIBE_LOCAL_MODEL": "model-a",
             "VIBE_CODER_MODEL": "model-b",
         }, clear=False):
             cfg._load_env()
-        assert cfg.model == "model-b"
+        assert cfg.model == "model-a"
 
     def test_load_env_debug(self):
         cfg = vc.Config()

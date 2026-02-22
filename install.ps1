@@ -623,9 +623,6 @@ Vaporwave-Progress (msg 'file_deploy') 1500
 if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "vibe-coder.py"))) {
     Vapor-Info (msg 'source_local')
     Copy-Item (Join-Path $ScriptDir "vibe-coder.py") -Destination $LibDir -Force
-    if (Test-Path (Join-Path $ScriptDir "anthropic-ollama-proxy.py")) {
-        Copy-Item (Join-Path $ScriptDir "anthropic-ollama-proxy.py") -Destination $LibDir -Force
-    }
     Copy-Item (Join-Path $ScriptDir "vibe-local.ps1") -Destination $BinDir -Force
     Copy-Item (Join-Path $ScriptDir "vibe-local.cmd") -Destination $BinDir -Force
 } else {
@@ -638,7 +635,6 @@ if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "vibe-coder.py"))) {
         Write-Host "  Check your internet connection or try again later."
         exit 1
     }
-    try { Invoke-WebRequest -Uri "$RepoRaw/anthropic-ollama-proxy.py" -OutFile (Join-Path $LibDir "anthropic-ollama-proxy.py") } catch {}
     try {
         Invoke-WebRequest -Uri "$RepoRaw/vibe-local.ps1" -OutFile (Join-Path $BinDir "vibe-local.ps1") -ErrorAction Stop
     } catch {

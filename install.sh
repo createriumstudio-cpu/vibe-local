@@ -894,7 +894,6 @@ vaporwave_progress "$(msg file_deploy)" 1.5
 if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/vibe-coder.py" ]; then
     vapor_info "$(msg source_local)"
     cp "${SCRIPT_DIR}/vibe-coder.py" "$LIB_DIR/"
-    cp "${SCRIPT_DIR}/anthropic-ollama-proxy.py" "$LIB_DIR/" 2>/dev/null || true
     cp "${SCRIPT_DIR}/vibe-local.sh" "$BIN_DIR/vibe-local"
 else
     REPO_RAW="https://raw.githubusercontent.com/ochyai/vibe-local/main"
@@ -905,7 +904,6 @@ else
         echo "  URL: ${REPO_RAW}/vibe-coder.py"
         exit 1
     fi
-    curl -fsSL "${REPO_RAW}/anthropic-ollama-proxy.py" -o "$LIB_DIR/anthropic-ollama-proxy.py" 2>/dev/null || true
     if ! curl -fsSL "${REPO_RAW}/vibe-local.sh" -o "$BIN_DIR/vibe-local"; then
         vapor_error "Failed to download vibe-local.sh from GitHub"
         echo "  Check your internet connection or try again later."
