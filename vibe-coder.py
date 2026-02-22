@@ -188,7 +188,7 @@ class Config:
 
     def _parse_config_file(self, cfg_path):
         try:
-            with open(cfg_path, encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8-sig") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#"):
@@ -1034,6 +1034,7 @@ class BashTool(Tool):
                 clean_env[k] = v
             if "PATH" not in clean_env:
                 clean_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+            clean_env.setdefault("LANG", "en_US.UTF-8")
             # Use process group on Unix to ensure all child processes are killed on timeout
             use_pgroup = platform.system() != "Windows"
             popen_kwargs = {
@@ -3978,6 +3979,7 @@ class Agent:
             if self._interrupted.is_set():
                 break
 
+            text = ""
             try:
                 # 1. Call Ollama (with retry for malformed responses)
                 tools = self.registry.get_schemas()
@@ -4201,6 +4203,8 @@ class Agent:
                 self.tui.stop_spinner()
                 if response is not None and hasattr(response, 'close'):
                     response.close()
+                if text:
+                    self.session.add_assistant_message(text)
                 print(f"\n{C.YELLOW}Interrupted.{C.RESET}")
                 self._interrupted.set()
                 break
@@ -4208,6 +4212,8 @@ class Agent:
                 self.tui.stop_spinner()
                 if response is not None and hasattr(response, 'close'):
                     response.close()
+                if text:
+                    self.session.add_assistant_message(text)
                 print(f"\n{C.RED}Connection error: {e}{C.RESET}")
                 print(f"{C.DIM}Is Ollama running? Check: curl {self.config.ollama_host}/api/tags{C.RESET}")
                 break
@@ -4215,6 +4221,8 @@ class Agent:
                 self.tui.stop_spinner()
                 if response is not None and hasattr(response, 'close'):
                     response.close()
+                if text:
+                    self.session.add_assistant_message(text)
                 print(f"\n{C.RED}Error ({type(e).__name__}): {e}{C.RESET}")
                 if self.config.debug:
                     traceback.print_exc()
