@@ -19,6 +19,13 @@ import re
 import traceback
 import shutil
 
+# Force unbuffered stdout so print() appears immediately in log files
+if hasattr(sys.stdout, 'buffer'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, write_through=True, line_buffering=True)
+
+print("[proxy] === PROXY MODULE LOADED (with WebSearch interception) ===", file=sys.stderr)
+
 OLLAMA_BASE = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 PROXY_PORT = int(os.environ.get("VIBE_LOCAL_PROXY_PORT", "8082"))
 
@@ -263,6 +270,68 @@ def _cleanup_old_sessions(max_age_days=7):
         print(f"[proxy] Cleaned up {cleaned} old session(s) (>{max_age_days} days)", file=sys.stderr)
 
 
+def _ddg_search(query, max_results=8):
+    """Search DuckDuckGo HTML endpoint. Zero dependencies (stdlib only).
+    Returns list of {"title": str, "url": str, "snippet": str}."""
+    search_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    req = urllib.request.Request(search_url, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    })
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"[proxy][websearch] DuckDuckGo fetch failed: {e}", file=sys.stderr)
+        return None  # None = network error (distinct from empty results [])
+
+    results = []
+    # DuckDuckGo HTML results: <a class="result__a" href="...">Title</a>
+    # Snippets: <a class="result__snippet" ...>Snippet text</a>
+    # URLs may be DDG redirects: //duckduckgo.com/l/?uddg=ENCODED_URL&...
+    link_pat = re.compile(
+        r'<a\s+[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+    snippet_pat = re.compile(
+        r'<a\s+[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+
+    links = link_pat.findall(html)
+    snippets = snippet_pat.findall(html)
+
+    for i, (raw_url, raw_title) in enumerate(links[:max_results + 5]):
+        # Clean HTML tags from title
+        title = re.sub(r"<[^>]+>", "", raw_title).strip()
+        if not title:
+            continue
+
+        # Extract real URL from DDG redirect
+        url = raw_url
+        if "uddg=" in url:
+            m = re.search(r"uddg=([^&]+)", url)
+            if m:
+                url = urllib.parse.unquote(m.group(1))
+        elif url.startswith("//"):
+            url = "https:" + url
+
+        # Skip ad results (DDG ad tracker URLs)
+        if "/y.js?" in url or "ad_provider" in url or "duckduckgo.com/y.js" in url:
+            continue
+
+        # Get snippet if available
+        snippet = ""
+        if i < len(snippets):
+            snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
+
+        results.append({"title": title, "url": url, "snippet": snippet})
+        if len(results) >= max_results:
+            break
+
+    print(f"[proxy][websearch] DDG returned {len(results)} results for: {query}")
+    return results
+
+
 def _extract_tool_calls_from_text(text, known_tools=None):
     """Parse XML-style tool calls from text content.
     Returns (tool_calls_list, cleaned_text)."""
@@ -402,9 +471,140 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._respond(404, {"error": f"unknown path: {self.path}"})
 
+    def _handle_web_search(self, req, req_id, t_start):
+        """Handle WebSearch sidecar call: search DuckDuckGo, return results as text.
+
+        Returns a simple text response (same format as normal model response).
+        Claude Code CLI takes this text and injects it as tool_result for the
+        main model, which then uses real search results instead of fabricating.
+        """
+        # Extract query from user message
+        messages = req.get("messages", [])
+        query = ""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text.startswith("Perform a web search for the query: "):
+                                query = text[len("Perform a web search for the query: "):].strip()
+                            else:
+                                query = text.strip()
+                elif isinstance(content, str):
+                    if content.startswith("Perform a web search for the query: "):
+                        query = content[len("Perform a web search for the query: "):].strip()
+                    else:
+                        query = content.strip()
+
+        if not query:
+            query = "test"
+
+        print(f"[proxy][websearch] === INTERCEPTED WebSearch sidecar ===", file=sys.stderr)
+        print(f"[proxy][websearch] Query: {query}", file=sys.stderr)
+        _log("websearch_intercept", {"query": query}, req_id=req_id)
+
+        # Perform DuckDuckGo search
+        try:
+            results = _ddg_search(query)
+        except Exception as e:
+            print(f"[proxy][websearch] DDG search exception: {e}", file=sys.stderr)
+            traceback.print_exc()
+            results = None
+
+        # Build response text
+        if results is None:
+            response_text = (
+                f'Web search failed for "{query}" (offline or network error). '
+                f'Try using Bash(curl "URL") to fetch specific pages instead.'
+            )
+            result_count = 0
+        elif len(results) == 0:
+            response_text = f'No web search results found for "{query}".'
+            result_count = 0
+        else:
+            lines = [f'Web search results for "{query}":\n']
+            for i, r in enumerate(results, 1):
+                lines.append(f'{i}. {r["title"]}')
+                lines.append(f'   URL: {r["url"]}')
+                if r.get("snippet"):
+                    lines.append(f'   {r["snippet"]}')
+                lines.append("")
+            lines.append("IMPORTANT: These are real search results from DuckDuckGo. "
+                         "Use the URLs above as sources. Do NOT fabricate URLs.")
+            response_text = "\n".join(lines)
+            result_count = len(results)
+
+        elapsed_ms = int((time.time() - t_start) * 1000)
+        _log("websearch_response", {
+            "query": query,
+            "result_count": result_count,
+            "elapsed_ms": elapsed_ms,
+            "response_length": len(response_text),
+        }, req_id=req_id)
+
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        model = req.get("model", "claude-haiku-4-5-20251001")
+
+        # Return as simple streaming text response
+        # This is the same format qwen3:8b returns through the normal proxy path,
+        # which Claude Code CLI is proven to accept and use as tool_result.
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        self._send_sse("message_start", {
+            "type": "message_start",
+            "message": {
+                "id": msg_id, "type": "message", "role": "assistant",
+                "content": [], "model": model,
+                "stop_reason": None, "stop_sequence": None,
+                "usage": {"input_tokens": 100, "output_tokens": 0,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            },
+        })
+
+        # Single text content block with search results
+        self._send_sse("content_block_start", {
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""},
+        })
+        self._send_sse("content_block_delta", {
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": response_text},
+        })
+        self._send_sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+
+        self._send_sse("message_delta", {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": len(response_text) // 4},
+        })
+        self._send_sse("message_stop", {"type": "message_stop"})
+        self.wfile.flush()
+
+        print(f"[proxy][websearch] Done in {elapsed_ms}ms, {result_count} results returned as text", file=sys.stderr)
+
     def _handle_messages(self, req):
         req_id = _next_request_id()
         t_start = time.time()
+
+        # Log every request to stderr (unbuffered) for debugging
+        _tc = req.get("tool_choice", None)
+        _tl = req.get("tools", None)
+        print(f"[proxy] REQ#{req_id} model={req.get('model','?')} "
+              f"tools={'None' if _tl is None else len(_tl)} "
+              f"tc_name={_tc.get('name','') if isinstance(_tc, dict) else str(_tc)} "
+              f"stream={req.get('stream', False)}", file=sys.stderr)
+
+        # --- WebSearch sidecar interception ---
+        # Detect: tool_choice.name == "web_search" (regardless of tools array)
+        tool_choice = req.get("tool_choice")
+        if isinstance(tool_choice, dict) and tool_choice.get("name") == "web_search":
+            print(f"[proxy] >>> WEBSEARCH INTERCEPTED req#{req_id} <<<", file=sys.stderr)
+            return self._handle_web_search(req, req_id, t_start)
 
         requested_model = req.get("model", "qwen3-coder:30b")
         messages = req.get("messages", [])

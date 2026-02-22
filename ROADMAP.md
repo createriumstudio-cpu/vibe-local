@@ -51,6 +51,13 @@ Working:
 **Evidence**: `速度: 62497265 bytes/sec\\nダウンロード時間: 0.160007s\\n`
 **Fix**: Fix speed test example to use `$'\n'` or avoid newlines entirely.
 
+### P0-6: WebSearch returns fabricated URLs
+**Status**: DONE ✅ (verified 2026-02-22)
+**Impact**: WebSearch sidecar calls go to Ollama which can't search → model fabricates URLs
+**Evidence**: Sidecar request with `tool_choice: {name: "web_search"}` gets proxied to Ollama, returns empty, model invents sources
+**Fix**: Proxy intercepts WebSearch sidecar calls (`tool_choice.name == "web_search"`), performs real DuckDuckGo HTML search (`html.duckduckgo.com`), returns actual results as text. 8 results in ~1.3s. Offline fallback returns honest "not available" message.
+**Key learning**: Detection must check `tool_choice.name` only (not `tools` array), because Claude Code sends `tools: [web_search_tool]` (1 element) not `tools: []`. Response uses simple text format (not `server_tool_use` + `web_search_tool_result` which requires opaque `encrypted_content`). "Did 0 searches" counter is cosmetic only — real results are used.
+
 ## P1 — High (Functional Issues)
 
 ### P1-1: Auto-install dependencies
