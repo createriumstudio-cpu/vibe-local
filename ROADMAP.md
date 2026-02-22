@@ -1,7 +1,56 @@
 # vibe-local Improvement Roadmap
 
-> Last updated: 2026-02-22
-> Based on debug sessions: session_20260222_160817 (94 req), session_20260222_164340 (11 req), session_20260222_164837 (47 req)
+> Last updated: 2026-02-23
+
+## vibe-coder: Claude Code Replacement (v0.3)
+
+**Architecture change**: Claude Code CLI + proxy replaced with vibe-coder.py
+```
+OLD: vibe-local.sh → claude CLI (proprietary) → proxy.py → Ollama
+NEW: vibe-local.sh → vibe-coder.py (OSS) → Ollama direct
+```
+
+**Benefits**: No login, no Node.js, no proxy process, fully OSS, Python+Ollama only
+
+### vibe-coder.py Implementation Status
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 1 | Config (CLI args, config file, env vars) | DONE |
+| 1 | OllamaClient (direct /v1/chat/completions) | DONE |
+| 1 | BashTool (subprocess, timeout) | DONE |
+| 1 | ReadTool (cat -n format, offset/limit) | DONE |
+| 1 | WriteTool (absolute paths, mkdir -p) | DONE |
+| 1 | EditTool (unique check, replace_all) | DONE |
+| 1 | ToolRegistry + OpenAI function calling schemas | DONE |
+| 1 | PermissionMgr (safe/ask/deny) | DONE |
+| 1 | Session (in-memory, JSONL persistence) | DONE |
+| 1 | Agent loop (LLM → tool → result → loop) | DONE |
+| 1 | TUI (readline, ANSI colors, streaming) | DONE |
+| 1 | XML tool call fallback (Qwen models) | DONE |
+| 2 | GlobTool (os.walk + fnmatch) | DONE |
+| 2 | GrepTool (os.walk + re, context lines) | DONE |
+| 2 | WebFetchTool (urllib, HTML→text) | DONE |
+| 2 | WebSearchTool (DuckDuckGo HTML) | DONE |
+| 2 | NotebookEditTool (JSON .ipynb) | DONE |
+| 2 | System prompt with OS-specific hints | DONE |
+| 3 | Markdown rendering in TUI | DONE |
+| 3 | Multi-line input (""") | DONE |
+| 3 | Session persistence (JSONL) | DONE |
+| 3 | Session resume (--resume, --session-id) | DONE |
+| 3 | Context compaction | DONE |
+| 4 | Permission system (safe/ask/network tiers) | DONE |
+| 4 | -y flag (auto-approve) | DONE |
+| 5 | Subagent/Task tools | TODO |
+| 5 | Plan mode | TODO |
+
+### Launcher Updates
+- vibe-local.sh: Updated to use vibe-coder.py directly (no proxy)
+- vibe-local.ps1: Updated to use vibe-coder.py directly (no proxy)
+- install.sh: Node.js/Claude Code now optional
+- install.ps1: Node.js/Claude Code now optional
+
+---
 
 ## Current State (v0.2)
 

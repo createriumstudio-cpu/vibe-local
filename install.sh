@@ -405,6 +405,12 @@ vaporwave_progress() {
 # [SEC] Use mktemp for unpredictable temp file path (avoid symlink attacks)
 SPINNER_LOG="$(mktemp /tmp/vibe-local-install-XXXXXX.log 2>/dev/null || echo "/tmp/vibe-local-install-$RANDOM-$$.log")"
 
+# [SEC] Ensure temp log is cleaned up on exit or interrupt
+cleanup() {
+    [ -f "${SPINNER_LOG:-}" ] && rm -f "$SPINNER_LOG"
+}
+trap cleanup EXIT INT TERM
+
 run_with_spinner() {
     local label="$1"
     shift
@@ -491,6 +497,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# --- Pre-flight: curl is required for downloads ---
+if ! command -v curl &>/dev/null; then
+    vapor_error "curl is not installed."
+    echo "  Install it:"
+    echo "    macOS:  xcode-select --install"
+    echo "    Debian/Ubuntu: sudo apt-get install -y curl"
+    echo "    RHEL/Fedora: sudo dnf install -y curl"
+    exit 1
+fi
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  🌅  Ｔ Ｉ Ｔ Ｌ Ｅ   Ｓ Ｃ Ｒ Ｅ Ｅ Ｎ                ║
@@ -676,6 +692,7 @@ if [ "$IS_MAC" -eq 1 ]; then
         else
             vapor_error "Homebrew 🍺 $(msg install_fail)"
             vapor_warn "$(msg install_fail_hint): /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            exit 1
         fi
     fi
 fi
@@ -703,57 +720,21 @@ else
     fi
 fi
 
-# --- Node.js ---
+# --- Node.js (optional, for --auto mode Claude Code fallback) ---
 if command -v node &>/dev/null; then
-    vapor_success "Node.js 💚 $(msg installed) ($(node --version))"
+    vapor_success "Node.js 💚 $(msg installed) ($(node --version)) [optional]"
 else
-    if [ "$IS_MAC" -eq 1 ] && command -v brew &>/dev/null; then
-        if run_with_spinner "Node.js 💚 $(msg installing)" brew install node; then
-            vapor_success "Node.js 💚 $(msg install_done) ($(node --version 2>/dev/null || echo '?'))"
-        else
-            vapor_error "Node.js 💚 $(msg install_fail)"
-            vapor_warn "$(msg install_fail_hint): brew install node"
-        fi
-    elif [ "$IS_LINUX" -eq 1 ]; then
-        if command -v apt-get &>/dev/null; then
-            run_with_spinner "Node.js 💚 $(msg installing)" bash -c "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs"
-        elif command -v dnf &>/dev/null; then
-            run_with_spinner "Node.js 💚 $(msg installing)" sudo dnf install -y nodejs
-        else
-            vapor_error "$(msg no_pkgmgr)"
-        fi
-        if command -v node &>/dev/null; then
-            vapor_success "Node.js 💚 $(msg install_done) ($(node --version))"
-        else
-            vapor_error "Node.js 💚 $(msg install_fail)"
-            vapor_warn "$(msg install_fail_hint): sudo apt-get install -y nodejs"
-        fi
-    fi
+    vapor_info "Node.js 💚 not installed (optional — only needed for --auto mode with Claude Code)"
 fi
 
-# --- Claude Code CLI ---
+# --- Claude Code CLI (optional, for --auto mode fallback) ---
 if command -v claude &>/dev/null; then
-    vapor_success "Claude Code CLI 🤖 $(msg installed)"
+    vapor_success "Claude Code CLI 🤖 $(msg installed) [optional]"
 else
-    # npm install -g は権限エラーになることがある
-    if run_with_spinner "Claude Code CLI 🤖 $(msg installing)" npm install -g @anthropic-ai/claude-code; then
-        vapor_success "Claude Code CLI 🤖 $(msg install_done)"
-    else
-        # 権限エラーの可能性 → npm prefix を変更して再試行
-        vapor_warn "$(msg npm_perm)"
-        mkdir -p "${HOME}/.npm-global"
-        npm config set prefix "${HOME}/.npm-global" 2>/dev/null || true
-        export PATH="${HOME}/.npm-global/bin:${PATH}"
-        if run_with_spinner "Claude Code CLI 🤖 $(msg installing)" npm install -g @anthropic-ai/claude-code; then
-            vapor_success "Claude Code CLI 🤖 $(msg install_done)"
-        else
-            vapor_error "Claude Code CLI 🤖 $(msg install_fail)"
-            vapor_warn "$(msg install_fail_hint): npm install -g @anthropic-ai/claude-code"
-        fi
-    fi
+    vapor_info "Claude Code CLI 🤖 not installed (optional — vibe-coder replaces it)"
 fi
 
-# --- Python3 ---
+# --- Python3 (REQUIRED for vibe-coder) ---
 if command -v python3 &>/dev/null; then
     vapor_success "Python3 🐍 $(msg installed) ($(python3 --version 2>/dev/null))"
 else
@@ -807,7 +788,24 @@ if ! curl -s --max-time 2 "http://localhost:11434/api/tags" &>/dev/null; then
     if curl -s --max-time 2 "http://localhost:11434/api/tags" &>/dev/null; then
         vapor_success "Ollama 🦙 $(msg online)"
     else
-        vapor_warn "Ollama 🦙 $(msg standby)"
+        vapor_error "Ollama failed to start after 30 seconds."
+        echo "  Possible causes:"
+        echo "    - Ollama was not installed correctly"
+        echo "    - Another process is using port 11434"
+        echo "  Try:"
+        echo "    ollama serve    (in a separate terminal)"
+        echo "  Then re-run: bash install.sh"
+        exit 1
+    fi
+fi
+
+# Check disk space (warn if < 20GB free)
+if command -v df &>/dev/null; then
+    AVAIL_KB=$(df -k "$HOME" | awk 'NR==2{print $4}')
+    AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
+    if [ "$AVAIL_GB" -lt 20 ]; then
+        vapor_warn "Low disk space: ${AVAIL_GB}GB available (20GB+ recommended for model download)"
+        echo "  Free up disk space if the download fails."
     fi
 fi
 
@@ -825,7 +823,12 @@ download_model() {
     echo -e "  ${DIM}${AQUA}      $(msg model_download_hint)${NC}"
     echo -e "  ${PINK}💜${MAGENTA}💜${PURPLE}💜${CYAN}💜${AQUA}💜${MINT}💜${NEON_GREEN}💜${YELLOW}💜${ORANGE}💜${CORAL}💜${HOT_PINK}💜${NC}"
     echo ""
-    ollama pull "$model_name"
+    # Pull with timeout (30 minutes max — large models take time)
+    timeout 1800 ollama pull "$model_name" || {
+        echo -e "  ${RED}⚠️  ダウンロードがタイムアウト(30分)しました${NC}"
+        echo -e "  ${DIM}手動で再試行: ollama pull $model_name${NC}"
+        return 1
+    }
     echo ""
     if curl -s "http://localhost:11434/api/tags" 2>/dev/null | grep -qF "$model_name"; then
         echo -e "  ${PINK}💜${MAGENTA}💜${PURPLE}💜${CYAN}💜${AQUA}💜${MINT}💜${NEON_GREEN}💜${YELLOW}💜${ORANGE}💜${CORAL}💜${HOT_PINK}💜${NC}"
@@ -860,26 +863,58 @@ step_header 5 "$(msg step5)"
 LIB_DIR="${HOME}/.local/lib/vibe-local"
 BIN_DIR="${HOME}/.local/bin"
 
-mkdir -p "$LIB_DIR"
-mkdir -p "$BIN_DIR"
+# Check write permission before creating directories
+for _check_dir in "$LIB_DIR" "$BIN_DIR"; do
+    _parent="$(dirname "$_check_dir")"
+    while [ ! -d "$_parent" ] && [ "$_parent" != "/" ]; do
+        _parent="$(dirname "$_parent")"
+    done
+    if [ -d "$_parent" ] && [ ! -w "$_parent" ]; then
+        vapor_error "書き込み権限がありません: $_parent"
+        echo -e "  ${DIM}対処法: sudo mkdir -p ${_check_dir} && sudo chown \$USER ${_check_dir}${NC}"
+        exit 1
+    fi
+done
+unset _check_dir _parent
+
+mkdir -p "$LIB_DIR" || { vapor_error "ディレクトリ作成失敗: $LIB_DIR"; exit 1; }
+mkdir -p "$BIN_DIR" || { vapor_error "ディレクトリ作成失敗: $BIN_DIR"; exit 1; }
+
+# Verify directories are writable after creation
+if ! [ -w "$LIB_DIR" ] || ! [ -w "$BIN_DIR" ]; then
+    vapor_error "Cannot write to $LIB_DIR or $BIN_DIR"
+    echo "  Fix: sudo chown -R \$USER ~/.local"
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 vaporwave_progress "$(msg file_deploy)" 1.5
 
-if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/anthropic-ollama-proxy.py" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/vibe-coder.py" ]; then
     vapor_info "$(msg source_local)"
-    cp "${SCRIPT_DIR}/anthropic-ollama-proxy.py" "$LIB_DIR/"
+    cp "${SCRIPT_DIR}/vibe-coder.py" "$LIB_DIR/"
+    cp "${SCRIPT_DIR}/anthropic-ollama-proxy.py" "$LIB_DIR/" 2>/dev/null || true
     cp "${SCRIPT_DIR}/vibe-local.sh" "$BIN_DIR/vibe-local"
 else
     REPO_RAW="https://raw.githubusercontent.com/ochyai/vibe-local/main"
     vapor_info "$(msg source_github)"
-    curl -fsSL "${REPO_RAW}/anthropic-ollama-proxy.py" -o "$LIB_DIR/anthropic-ollama-proxy.py"
-    curl -fsSL "${REPO_RAW}/vibe-local.sh" -o "$BIN_DIR/vibe-local"
+    if ! curl -fsSL "${REPO_RAW}/vibe-coder.py" -o "$LIB_DIR/vibe-coder.py"; then
+        vapor_error "Failed to download vibe-coder.py from GitHub"
+        echo "  Check your internet connection or try again later."
+        echo "  URL: ${REPO_RAW}/vibe-coder.py"
+        exit 1
+    fi
+    curl -fsSL "${REPO_RAW}/anthropic-ollama-proxy.py" -o "$LIB_DIR/anthropic-ollama-proxy.py" 2>/dev/null || true
+    if ! curl -fsSL "${REPO_RAW}/vibe-local.sh" -o "$BIN_DIR/vibe-local"; then
+        vapor_error "Failed to download vibe-local.sh from GitHub"
+        echo "  Check your internet connection or try again later."
+        exit 1
+    fi
 fi
 
 chmod +x "$BIN_DIR/vibe-local"
-vapor_success "Proxy → $LIB_DIR/"
+vapor_success "vibe-coder.py → $LIB_DIR/"
 vapor_success "Command → $BIN_DIR/vibe-local"
 
 # =============================================
@@ -900,10 +935,10 @@ else
     cat > "$CONFIG_FILE" << EOF
 # vibe-local config
 # Auto-generated: $(date '+%Y-%m-%d %H:%M:%S')
+# Engine: vibe-coder (direct Ollama, no proxy needed)
 
 MODEL="$MODEL"
 SIDECAR_MODEL="${SIDECAR_MODEL}"
-PROXY_PORT=8082
 OLLAMA_HOST="http://localhost:11434"
 EOF
     vapor_success "$(msg config_file): $CONFIG_FILE"
@@ -950,33 +985,17 @@ else
     vapor_warn "Ollama Server       → 🟡 $(msg standby)"
 fi
 
-# テストプロキシ: 空きポートを探す
-TEST_PORT=8083
-for try_port in 8083 8084 8085 8086; do
-    if ! curl -s --max-time 1 "http://127.0.0.1:${try_port}/" &>/dev/null; then
-        TEST_PORT=$try_port
-        break
-    fi
-done
-
-TEST_STATE_DIR="${HOME}/.local/state/vibe-local"
-mkdir -p "$TEST_STATE_DIR" && chmod 700 "$TEST_STATE_DIR"
-python3 "$LIB_DIR/anthropic-ollama-proxy.py" "$TEST_PORT" &>"${TEST_STATE_DIR}/test-proxy.log" &
-TEST_PID=$!
-sleep 2
-
-if curl -s --max-time 2 "http://127.0.0.1:${TEST_PORT}/" &>/dev/null; then
-    vapor_success "API Proxy           → 🟢 $(msg online)"
+# vibe-coder.py syntax check
+if python3 -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$LIB_DIR/vibe-coder.py" 2>/dev/null; then
+    vapor_success "vibe-coder.py       → 🟢 $(msg ready)"
 else
-    vapor_warn "API Proxy           → 🟡 $(msg warning)"
+    vapor_warn "vibe-coder.py       → 🟡 $(msg warning) (syntax error)"
 fi
-kill "$TEST_PID" 2>/dev/null || true
-wait "$TEST_PID" 2>/dev/null || true
 
 if command -v claude &>/dev/null; then
-    vapor_success "Claude Code CLI     → 🟢 $(msg ready)"
+    vapor_info "Claude Code CLI     → 🟢 available (optional, for --auto mode)"
 else
-    vapor_warn "Claude Code CLI     → 🟡 $(msg path_reopen)"
+    vapor_info "Claude Code CLI     → not installed (not needed)"
 fi
 
 if curl -s "http://localhost:11434/api/tags" 2>/dev/null | grep -qF "$MODEL"; then

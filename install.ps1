@@ -419,18 +419,14 @@ if ($Model) {
 # =============================================
 Step-Header 3 (msg 'step3')
 
-# --- Git ---
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    Vapor-Success "Git $(msg 'installed') ($(git --version 2>&1))"
-} else {
-    Vapor-Info "Git $(msg 'installing')"
-    try {
-        winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        Vapor-Success "Git $(msg 'install_done')"
-    } catch {
-        Vapor-Error "Git $(msg 'install_fail')"
-        Vapor-Warn "$(msg 'install_fail_hint'): winget install Git.Git"
-    }
+# --- winget pre-flight check ---
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Vapor-Warn "winget is not available on this system."
+    Write-Host "  Install dependencies manually:"
+    Write-Host "    Ollama: https://ollama.com/download/OllamaSetup.exe"
+    Write-Host "    Python: https://www.python.org/downloads/"
+    Write-Host "  Then re-run this installer."
+    # Don't exit - continue in case user installed them manually
 }
 
 # --- Python ---
@@ -449,11 +445,32 @@ if ($PythonCmd) {
     try {
         winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
         Vapor-Success "Python $(msg 'install_done')"
-        $PythonCmd = "py"
+        # Refresh PATH so newly installed Python is found
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        # Try to find the newly installed Python
+        $PythonCmd = $null
+        foreach ($pyCmd in @("py", "python3", "python")) {
+            if (Get-Command $pyCmd -ErrorAction SilentlyContinue) {
+                $PythonCmd = $pyCmd
+                break
+            }
+        }
+        if (-not $PythonCmd) {
+            Vapor-Warn "Python installed but not found in PATH. Please restart terminal and re-run installer."
+        }
     } catch {
         Vapor-Error "Python $(msg 'install_fail')"
         Vapor-Warn "$(msg 'install_fail_hint'): winget install Python.Python.3.12"
     }
+}
+
+# Fatal check: Python is required
+if (-not $PythonCmd) {
+    Vapor-Error "Python 3 is required but could not be found."
+    Write-Host "  Download from: https://www.python.org/downloads/"
+    Write-Host "  IMPORTANT: Check 'Add Python to PATH' during installation."
+    Write-Host "  Then open a NEW PowerShell window and re-run this installer."
+    exit 1
 }
 
 # --- Ollama ---
@@ -471,43 +488,26 @@ if (Get-Command ollama -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- Claude Code CLI ---
+# --- Claude Code CLI (optional, for --auto mode fallback) ---
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-    Vapor-Success "Claude Code CLI $(msg 'installed')"
+    Vapor-Success "Claude Code CLI $(msg 'installed') [optional]"
 } else {
-    Vapor-Info "Claude Code CLI $(msg 'installing')"
-    try {
-        # Official Claude Code installer for Windows
-        # [SEC] Download to temp file first, then execute (avoid Invoke-Expression on remote content)
-        $ccInstaller = Join-Path $env:TEMP "claude-code-install-$(Get-Random).ps1"
-        try {
-            Invoke-WebRequest -Uri "https://claude.ai/install.ps1" -OutFile $ccInstaller -ErrorAction Stop
-            & $ccInstaller 2>&1 | Out-Null
-        } finally {
-            Remove-Item $ccInstaller -Force -ErrorAction SilentlyContinue
-        }
-        Vapor-Success "Claude Code CLI $(msg 'install_done')"
-    } catch {
-        # Fallback to npm
-        if (Get-Command npm -ErrorAction SilentlyContinue) {
-            try {
-                npm install -g @anthropic-ai/claude-code 2>&1 | Out-Null
-                Vapor-Success "Claude Code CLI $(msg 'install_done') (via npm)"
-            } catch {
-                Vapor-Error "Claude Code CLI $(msg 'install_fail')"
-                Vapor-Warn "$(msg 'install_fail_hint'): npm install -g @anthropic-ai/claude-code"
-            }
-        } else {
-            Vapor-Error "Claude Code CLI $(msg 'install_fail')"
-            Vapor-Warn "Install Node.js first, then: npm install -g @anthropic-ai/claude-code"
-        }
-    }
+    Vapor-Info "Claude Code CLI not installed (optional - vibe-coder replaces it)"
 }
 
 # =============================================
 # Step 4: Model download
 # =============================================
 Step-Header 4 (msg 'step4')
+
+# --- Disk space warning ---
+try {
+    $drive = (Resolve-Path $env:USERPROFILE).Drive
+    $freeGB = [math]::Round($drive.Free / 1GB)
+    if ($freeGB -lt 20) {
+        Vapor-Warn "Low disk space: ${freeGB}GB available (20GB+ recommended)"
+    }
+} catch { }
 
 # Ensure Ollama is running
 $ollamaRunning = $false
@@ -538,7 +538,13 @@ if (-not $ollamaRunning) {
     if ($ollamaRunning) {
         Vapor-Success "Ollama $(msg 'online')"
     } else {
-        Vapor-Warn "Ollama $(msg 'standby')"
+        Vapor-Error "Ollama failed to start after 30 seconds."
+        Write-Host "  Possible causes:"
+        Write-Host "    - Ollama was not installed correctly"
+        Write-Host "    - Another process is using port 11434"
+        Write-Host "  Try: ollama serve (in a separate terminal)"
+        Write-Host "  Then re-run this installer."
+        exit 1
     }
 }
 
@@ -599,24 +605,57 @@ $BinDir = Join-Path $env:USERPROFILE ".local\bin"
 if (-not (Test-Path $LibDir)) { New-Item -ItemType Directory -Path $LibDir -Force | Out-Null }
 if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir -Force | Out-Null }
 
+# --- Write permission check ---
+try {
+    $testFile = Join-Path $LibDir ".write-test"
+    [IO.File]::WriteAllText($testFile, "test")
+    Remove-Item $testFile -Force
+} catch {
+    Vapor-Error "Cannot write to $LibDir"
+    Write-Host "  Check folder permissions and try running as Administrator."
+    exit 1
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Vaporwave-Progress (msg 'file_deploy') 1500
 
-if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "anthropic-ollama-proxy.py"))) {
+if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "vibe-coder.py"))) {
     Vapor-Info (msg 'source_local')
-    Copy-Item (Join-Path $ScriptDir "anthropic-ollama-proxy.py") -Destination $LibDir -Force
+    Copy-Item (Join-Path $ScriptDir "vibe-coder.py") -Destination $LibDir -Force
+    if (Test-Path (Join-Path $ScriptDir "anthropic-ollama-proxy.py")) {
+        Copy-Item (Join-Path $ScriptDir "anthropic-ollama-proxy.py") -Destination $LibDir -Force
+    }
     Copy-Item (Join-Path $ScriptDir "vibe-local.ps1") -Destination $BinDir -Force
     Copy-Item (Join-Path $ScriptDir "vibe-local.cmd") -Destination $BinDir -Force
 } else {
     $RepoRaw = "https://raw.githubusercontent.com/ochyai/vibe-local/main"
     Vapor-Info (msg 'source_github')
-    Invoke-WebRequest -Uri "$RepoRaw/anthropic-ollama-proxy.py" -OutFile (Join-Path $LibDir "anthropic-ollama-proxy.py")
-    Invoke-WebRequest -Uri "$RepoRaw/vibe-local.ps1" -OutFile (Join-Path $BinDir "vibe-local.ps1")
-    Invoke-WebRequest -Uri "$RepoRaw/vibe-local.cmd" -OutFile (Join-Path $BinDir "vibe-local.cmd")
+    try {
+        Invoke-WebRequest -Uri "$RepoRaw/vibe-coder.py" -OutFile (Join-Path $LibDir "vibe-coder.py") -ErrorAction Stop
+    } catch {
+        Vapor-Error "Failed to download vibe-coder.py from GitHub"
+        Write-Host "  Check your internet connection or try again later."
+        exit 1
+    }
+    try { Invoke-WebRequest -Uri "$RepoRaw/anthropic-ollama-proxy.py" -OutFile (Join-Path $LibDir "anthropic-ollama-proxy.py") } catch {}
+    try {
+        Invoke-WebRequest -Uri "$RepoRaw/vibe-local.ps1" -OutFile (Join-Path $BinDir "vibe-local.ps1") -ErrorAction Stop
+    } catch {
+        Vapor-Error "Failed to download vibe-local.ps1 from GitHub"
+        Write-Host "  Check your internet connection or try again later."
+        exit 1
+    }
+    try {
+        Invoke-WebRequest -Uri "$RepoRaw/vibe-local.cmd" -OutFile (Join-Path $BinDir "vibe-local.cmd") -ErrorAction Stop
+    } catch {
+        Vapor-Error "Failed to download vibe-local.cmd from GitHub"
+        Write-Host "  Check your internet connection or try again later."
+        exit 1
+    }
 }
 
-Vapor-Success "Proxy -> $LibDir"
+Vapor-Success "vibe-coder.py -> $LibDir"
 Vapor-Success "Command -> $BinDir\vibe-local.cmd"
 
 # =============================================
@@ -637,10 +676,10 @@ if (Test-Path $ConfigFile) {
     $configContent = @"
 # vibe-local config
 # Auto-generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+# Engine: vibe-coder (direct Ollama, no proxy needed)
 
 MODEL="$SelectedModel"
 SIDECAR_MODEL="$SidecarModel"
-PROXY_PORT=8082
 OLLAMA_HOST="http://localhost:11434"
 "@
     Set-Content -Path $ConfigFile -Value $configContent -Encoding UTF8
@@ -674,41 +713,31 @@ try {
     Vapor-Warn "Ollama Server       -> $(msg 'standby')"
 }
 
-# Proxy quick test
-$TestPort = 8083
-foreach ($tp in @(8083, 8084, 8085, 8086)) {
-    $conn = Get-NetTCPConnection -LocalPort $tp -ErrorAction SilentlyContinue
-    if (-not $conn) { $TestPort = $tp; break }
-}
-
-# Find python for test
+# vibe-coder.py syntax check
 $testPy = $null
 foreach ($p in @("py", "python3", "python")) {
     if (Get-Command $p -ErrorAction SilentlyContinue) { $testPy = $p; break }
 }
 
-if ($testPy) {
-    $testProxyScript = Join-Path $LibDir "anthropic-ollama-proxy.py"
-    if ($testPy -eq "py") {
-        $testProc = Start-Process -FilePath "py" -ArgumentList "-3 `"$testProxyScript`" $TestPort" -WindowStyle Hidden -PassThru
-    } else {
-        $testProc = Start-Process -FilePath $testPy -ArgumentList "`"$testProxyScript`" $TestPort" -WindowStyle Hidden -PassThru
-    }
-    Start-Sleep -Seconds 2
+$vibeCoderScript = Join-Path $LibDir "vibe-coder.py"
+if ($testPy -and (Test-Path $vibeCoderScript)) {
     try {
-        $null = Invoke-RestMethod -Uri "http://127.0.0.1:${TestPort}/" -TimeoutSec 2 -ErrorAction Stop
-        Vapor-Success "API Proxy           -> $(msg 'online')"
+        if ($testPy -eq "py") {
+            & py -3 -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$vibeCoderScript" 2>&1 | Out-Null
+        } else {
+            & $testPy -c "import ast, sys; ast.parse(open(sys.argv[1]).read())" "$vibeCoderScript" 2>&1 | Out-Null
+        }
+        Vapor-Success "vibe-coder.py       -> $(msg 'ready')"
     } catch {
-        Vapor-Warn "API Proxy           -> $(msg 'warning')"
+        Vapor-Warn "vibe-coder.py       -> $(msg 'warning') (syntax error)"
     }
-    Stop-Process -Id $testProc.Id -Force -ErrorAction SilentlyContinue
 }
 
-# Claude Code CLI
+# Claude Code CLI (optional)
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-    Vapor-Success "Claude Code CLI     -> $(msg 'ready')"
+    Vapor-Info "Claude Code CLI     -> available (optional, for --auto mode)"
 } else {
-    Vapor-Warn "Claude Code CLI     -> $(msg 'warning') (restart terminal)"
+    Vapor-Info "Claude Code CLI     -> not installed (not needed)"
 }
 
 # Model check

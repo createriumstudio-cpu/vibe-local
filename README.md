@@ -34,7 +34,13 @@
 ### これは何？
 
 MacやWindows、LinuxにコマンドをコピペするだけでAIがコードを書いてくれる環境。
-ネットワーク不要・完全無料。Ollama + ローカルLLM で Claude Code のインターフェースをそのまま使える。
+ネットワーク不要・完全無料。Python + Ollama だけで動く完全OSSのコーディングエージェント。
+
+**v0.8.0 (vibe-coder)**: Claude Code CLI不要。Python + Ollama だけでOK。
+```
+vibe-local → vibe-coder.py (OSS) → Ollama (直接通信)
+```
+ログイン不要・Node.js不要・プロキシプロセス不要。14個の内蔵ツール、サブエージェント、画像読み取り対応。
 
 ### インストール (3ステップ)
 
@@ -104,9 +110,10 @@ ollama serve          # Linux / Windows
 ollama pull qwen3:8b
 ```
 
-**"claude: command not found"**
+**"vibe-coder.py が見つかりません"**
 ```bash
-npm install -g @anthropic-ai/claude-code
+# 再インストール
+curl -fsSL https://raw.githubusercontent.com/ochyai/vibe-local/main/install.sh | bash
 ```
 
 **モデルを変更したい**
@@ -165,6 +172,21 @@ vibe-local
 vibe-local -p "Pythonで じゃんけんゲームを つくって"
 ```
 
+### たいわ コマンド（はなしている ときに つかえる めいれい）
+
+| コマンド | なにを する？ |
+|---|---|
+| `/help` | つかえる コマンドを みる |
+| `/exit` または `/quit` | おわる（セッションを ほぞんする） |
+| `/clear` | かいわを けす |
+| `/model <なまえ>` | モデルを かえる |
+| `/status` | いまの じょうほうを みる |
+| `/save` | セッションを ほぞんする |
+| `/compact` | かいわを みじかくする（メモリ せつやく） |
+| `/yes` | じどう きょか モード オン |
+| `"""` | ながい ぶんしょうを にゅうりょく する |
+| `Ctrl+C` | とめる / おわる |
+
 ### きをつけること
 
 > **⚠️ だいじ：AIが あぶない コマンドを うつことが あります！**
@@ -194,7 +216,13 @@ AIは かんぺきでは ありません。まちがった コマンドを う�
 ### What is this?
 
 A free AI coding environment you can set up with a single command on your Mac, Windows, or Linux.
-No network required. Completely free. Uses Ollama + local LLM with the Claude Code interface.
+No network required. Completely free. Python + Ollama only — a fully open-source coding agent.
+
+**v0.8.0 (vibe-coder)**: No Claude Code CLI needed. Just Python + Ollama.
+```
+vibe-local → vibe-coder.py (OSS) → Ollama (direct)
+```
+No login. No Node.js. No proxy process. 14 built-in tools, sub-agents, image reading.
 
 ### Install (3 steps)
 
@@ -264,9 +292,10 @@ ollama serve          # Linux / Windows
 ollama pull qwen3:8b
 ```
 
-**"claude: command not found"**
+**"vibe-coder.py not found"**
 ```bash
-npm install -g @anthropic-ai/claude-code
+# Reinstall
+curl -fsSL https://raw.githubusercontent.com/ochyai/vibe-local/main/install.sh | bash
 ```
 
 **Change model**
@@ -291,7 +320,13 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 ### 这是什么？
 
 在Mac、Windows 或 Linux上只需复制粘贴一个命令，AI就能帮你写代码。
-无需网络，完全免费。使用 Ollama + 本地大语言模型，享受 Claude Code 的界面体验。
+无需网络，完全免费。Python + Ollama 打造的完全开源编程代理。
+
+**v0.8.0 (vibe-coder)**: 不需要 Claude Code CLI。只需 Python + Ollama。
+```
+vibe-local → vibe-coder.py (开源) → Ollama (直接通信)
+```
+无需登录、无需Node.js、无需代理进程。14个内置工具、子代理、图像读取支持。
 
 ### 安装（3步）
 
@@ -361,9 +396,10 @@ ollama serve          # Linux / Windows
 ollama pull qwen3:8b
 ```
 
-**"claude: command not found"**
+**"vibe-coder.py 未找到"**
 ```bash
-npm install -g @anthropic-ai/claude-code
+# 重新安装
+curl -fsSL https://raw.githubusercontent.com/ochyai/vibe-local/main/install.sh | bash
 ```
 
 **更换模型**
@@ -383,81 +419,217 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 
 ---
 
-## 🔧 Architecture
+## 🔧 Architecture (v0.8.0 — vibe-coder)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  User                                                   │
 │  └─> vibe-local.sh / vibe-local.ps1 (launch script)     │
 │       ├─ Ensure Ollama is running                       │
-│       ├─ Start anthropic-ollama-proxy.py                │
-│       ├─ Set ANTHROPIC_BASE_URL → proxy                 │
-│       └─ Launch Claude Code CLI                         │
+│       └─ Launch vibe-coder.py (direct, no proxy)        │
 └──────────────────────┬──────────────────────────────────┘
-                       │ Anthropic Messages API
+                       │
                        ▼
 ┌─────────────────────────────────────────────────────────┐
-│  anthropic-ollama-proxy.py                              │
+│  vibe-coder.py  (single-file, Python stdlib only)       │
 │  ┌────────────────────────────────────────────────────┐ │
-│  │ 1. System Prompt Optimizer                         │ │
-│  │    - Replace ~15K Claude prompt → ~1K local prompt │ │
-│  │    - Extract & inject environment (OS, cwd, shell) │ │
-│  │    - Preserve CLAUDE.md user instructions          │ │
-│  │    - Add function-calling reinforcement hints      │ │
+│  │ Agent Loop (parallel tool execution)               │ │
+│  │    User input → LLM → Tool calls → Execute →      │ │
+│  │    Add results → Loop until done                   │ │
 │  ├────────────────────────────────────────────────────┤ │
-│  │ 2. Tool Filter                                     │ │
-│  │    - 20+ tools → 9 essential (Bash, Read, Write,   │ │
-│  │      Edit, Glob, Grep, WebFetch, WebSearch,        │ │
-│  │      NotebookEdit)                                 │ │
+│  │ 14 Built-in Tools                                  │ │
+│  │    Bash (+ background), Read (+ images/ipynb),     │ │
+│  │    Write, Edit (+ rich diff), Glob, Grep,          │ │
+│  │    WebFetch, WebSearch, NotebookEdit, SubAgent,    │ │
+│  │    TaskCreate, TaskList, TaskGet, TaskUpdate       │ │
 │  ├────────────────────────────────────────────────────┤ │
-│  │ 3. Model Router                                    │ │
-│  │    ┌───────────────────┐  ┌──────────────────────┐ │ │
-│  │    │ Main Model        │  │ Sidecar Model        │ │ │
-│  │    │ (qwen3-coder:30b) │  │ (qwen3:8b)           │ │ │
-│  │    │ - Coding tasks    │  │ - Permission checks  │ │ │
-│  │    │ - Tool use        │  │ - Init probes        │ │ │
-│  │    │ - Long context    │  │ - haiku/flash/mini   │ │ │
-│  │    │ - max_tokens:8192 │  │ - max_tokens:1024    │ │ │
-│  │    └───────┬───────────┘  └──────────┬───────────┘ │ │
-│  ├────────────┼─────────────────────────┼─────────────┤ │
-│  │ 4. API Translation (Anthropic → OpenAI format)     │ │
-│  │ 5. XML Tool Call Fallback Parser                   │ │
-│  │ 6. SSE Stream Conversion                           │ │
-│  └────────────┼─────────────────────────┼─────────────┘ │
-└───────────────┼─────────────────────────┼───────────────┘
-                │  OpenAI Chat API        │
-                ▼                         ▼
+│  │ System Prompt + OS-Specific Hints                  │ │
+│  │    macOS: brew, /Users/, system_profiler            │ │
+│  │    Linux: apt, /home/                              │ │
+│  │    Windows: winget, %USERPROFILE%                  │ │
+│  ├────────────────────────────────────────────────────┤ │
+│  │ XML Tool Call Fallback (Qwen model compat)         │ │
+│  │ Permission Manager (safe/ask/deny tiers)           │ │
+│  │ Session Persistence (JSONL) + Context Compaction   │ │
+│  │ TUI (readline, ANSI colors, markdown rendering)    │ │
+│  │ Multimodal (image base64 → Ollama vision models)  │ │
+│  └────────────────────┬───────────────────────────────┘ │
+└───────────────────────┼─────────────────────────────────┘
+                        │  OpenAI Chat API (/v1/chat/completions)
+                        ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Ollama (localhost:11434)                               │
 │  Local LLM inference runtime                            │
+│  qwen3-coder:30b / qwen3:8b / qwen3:1.7b               │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Dual-model routing / デュアルモデル構成 / 双模型架构
+### Key difference from v0.2
 
-The proxy automatically routes requests to two models:
-- **Main model** (e.g. `qwen3-coder:30b`): Coding tasks with tool use, long context
-- **Sidecar model** (e.g. `qwen3:8b`): Permission checks, init probes, short summaries
+| | v0.2 (proxy) | v0.8.0 (vibe-coder) |
+|---|---|---|
+| Engine | Claude Code CLI + proxy.py | vibe-coder.py (direct) |
+| Dependencies | Node.js + Python + Ollama | Python + Ollama only |
+| Processes | 3 (claude + proxy + ollama) | 2 (vibe-coder + ollama) |
+| Login required | Yes (Anthropic account) | No |
+| Fully OSS | No (Claude Code is proprietary) | Yes |
+| Tools | 9 | 14 (+ sub-agents, images, background) |
+| Tests | 0 | 432 |
 
-Routing rules (checked in order):
-1. Model name contains `haiku`/`flash`/`mini` → sidecar
-2. `max_tokens==1`, no tools, ≤1 message (init probe) → sidecar
-3. Everything else → main model
+---
 
-Debug logs show `(sidecar)` for routed requests: `VIBE_LOCAL_DEBUG=1 vibe-local`
+## 🖥️ CLI Reference / CLIリファレンス / CLI参考
 
-### Configuration / 設定 / 配置
+### CLI Flags / コマンドラインフラグ
+
+| Flag | Short | Description (EN) | 説明 (JP) | 说明 (CN) |
+|------|-------|------------------|-----------|-----------|
+| `--prompt` | `-p` | One-shot prompt (non-interactive) | ワンショットプロンプト（非対話モード） | 单次提示（非交互模式） |
+| `--model` | `-m` | Specify Ollama model name | Ollamaモデル名を指定 | 指定Ollama模型名称 |
+| `--yes` | `-y` | Auto-approve all tool calls | 全ツール呼び出しを自動許可 | 自动批准所有工具调用 |
+| `--debug` | | Enable debug logging | デバッグログを有効化 | 启用调试日志 |
+| `--resume` | | Resume last session | 最後のセッションを再開 | 恢复上一个会话 |
+| `--session-id <id>` | | Resume a specific session by ID | 指定IDのセッションを再開 | 通过ID恢复特定会话 |
+| `--list-sessions` | | List all saved sessions | 保存済みセッション一覧を表示 | 列出所有已保存的会话 |
+| `--ollama-host <url>` | | Ollama API endpoint URL | Ollama APIのエンドポイントURL | Ollama API端点URL |
+| `--max-tokens <n>` | | Max output tokens (default: 8192) | 最大出力トークン数（デフォルト: 8192） | 最大输出令牌数（默认: 8192） |
+| `--temperature <f>` | | Sampling temperature (default: 0.7) | サンプリング温度（デフォルト: 0.7） | 采样温度（默认: 0.7） |
+| `--context-window <n>` | | Context window size (default: 32768) | コンテキストウィンドウサイズ（デフォルト: 32768） | 上下文窗口大小（默认: 32768） |
+| `--version` | | Show version and exit | バージョンを表示して終了 | 显示版本并退出 |
+| `--dangerously-skip-permissions` | | Alias for `-y` (compatibility) | `-y`のエイリアス（互換性用） | `-y`的别名（兼容性用途） |
+
+### Examples / 使用例 / 使用示例
 
 ```bash
-~/.config/vibe-local/config
+# Interactive mode / 対話モード / 交互模式
+vibe-local
+
+# One-shot prompt / ワンショット / 单次执行
+vibe-local -p "Create a snake game in Python"
+
+# Specify model / モデル指定 / 指定模型
+vibe-local -m qwen3:8b
+
+# Auto-approve mode / 自動許可 / 自动批准
+vibe-local -y
+
+# Resume last session / セッション再開 / 恢复会话
+vibe-local --resume
+
+# Resume specific session / 特定セッション再開 / 恢复特定会话
+vibe-local --session-id 20240101_120000_abc123
+
+# List sessions / セッション一覧 / 列出会话
+vibe-local --list-sessions
+
+# Custom Ollama host / Ollamaホスト指定 / 自定义Ollama地址
+vibe-local --ollama-host http://localhost:11434
+
+# Debug mode / デバッグモード / 调试模式
+vibe-local --debug
+
+# Adjust generation parameters / 生成パラメータ調整 / 调整生成参数
+vibe-local --max-tokens 4096 --temperature 0.5 --context-window 65536
 ```
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `MODEL` | auto (by RAM) | Main model name |
-| `SIDECAR_MODEL` | auto (by RAM) | Sidecar model name |
-| `PROXY_PORT` | 8082 | Proxy listen port |
-| `OLLAMA_HOST` | http://localhost:11434 | Ollama API endpoint |
+---
+
+## ⌨️ Interactive Commands / 対話コマンド / 交互命令
+
+**🇯🇵** 対話モード中に使えるスラッシュコマンド：
+
+**🇺🇸** Slash commands available during interactive mode:
+
+**🇨🇳** 交互模式中可用的斜杠命令：
+
+| Command | Description (EN) | 説明 (JP) | 说明 (CN) |
+|---------|------------------|-----------|-----------|
+| `/help` | Show available commands | 使えるコマンド一覧を表示 | 显示可用命令 |
+| `/exit`, `/quit`, `/q` | Exit (session is auto-saved) | 終了（セッション自動保存） | 退出（会话自动保存） |
+| `/clear` | Clear conversation history | 会話履歴をクリア | 清除对话历史 |
+| `/model <name>` | Switch to a different model | 別のモデルに切り替え | 切换到其他模型 |
+| `/status` | Show session info (tokens, model, CWD) | セッション情報を表示（トークン数、モデル、CWD） | 显示会话信息（令牌数、模型、CWD） |
+| `/save` | Save current session | 現在のセッションを保存 | 保存当前会话 |
+| `/compact` | Compress conversation history (reduce tokens) | 会話履歴を圧縮（トークン削減） | 压缩对话历史（减少令牌） |
+| `/tokens` | Show detailed token usage | トークン使用量の詳細表示 | 显示详细令牌使用情况 |
+| `/undo` | Undo last file write/edit | 最後のファイル書き込み/編集を元に戻す | 撤销上次文件写入/编辑 |
+| `/config` | Show current configuration | 現在の設定を表示 | 显示当前配置 |
+| `/commit` | Stage and commit with git | gitでステージ＆コミット | 使用git暂存并提交 |
+| `/diff` | Show git diff | git diffを表示 | 显示git diff |
+| `/git <cmd>` | Run git subcommand | gitサブコマンドを実行 | 运行git子命令 |
+| `/plan` | Enter plan mode (read-only tools) | プランモード（読み取り専用ツール） | 进入计划模式（只读工具） |
+| `/execute` | Exit plan mode and execute | プランモード終了＆実行 | 退出计划模式并执行 |
+| `/init` | Create CLAUDE.md project file | CLAUDE.mdプロジェクトファイルを作成 | 创建CLAUDE.md项目文件 |
+| `/yes` | Enable auto-approve mode for this session | このセッションの自動許可モードをON | 启用本会话自动批准模式 |
+| `exit`, `quit`, `bye` | Exit (also accepts `exit;`, `quit;`, `bye;`) | 終了（`exit;`, `quit;`, `bye;`も可） | 退出（也接受`exit;`, `quit;`, `bye;`） |
+| `"""` | Enter multi-line input mode | 複数行入力モード | 进入多行输入模式 |
+| `Ctrl+C` | Stop current action (double-tap to exit) | 現在の操作を停止（2回で終了） | 停止当前操作（连按两次退出） |
+
+---
+
+## ⚙️ Configuration / 設定 / 配置
+
+### Config File / 設定ファイル / 配置文件
+
+```bash
+~/.config/vibe-local/config       # Also read by vibe-coder.py
+~/.config/vibe-coder/config       # vibe-coder.py native config (overrides above)
+```
+
+**🇯🇵** 設定ファイルは `KEY="value"` の形式です。`#` でコメント行。
+
+**🇺🇸** Config files use `KEY="value"` format. Lines starting with `#` are comments.
+
+**🇨🇳** 配置文件使用 `KEY="value"` 格式。以 `#` 开头的行为注释。
+
+| Key | Default | Description (EN) | 説明 (JP) | 说明 (CN) |
+|-----|---------|------------------|-----------|-----------|
+| `MODEL` | auto (by RAM) | Main model name | メインモデル名 | 主模型名称 |
+| `SIDECAR_MODEL` | auto (by RAM) | Sidecar model name (lighter, for permission checks etc.) | サイドカーモデル名（軽量タスク用） | 边车模型名称（轻量任务用） |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint | Ollama APIエンドポイント | Ollama API端点 |
+| `MAX_TOKENS` | `8192` | Maximum output tokens per response | レスポンスあたりの最大出力トークン数 | 每次响应的最大输出令牌数 |
+| `TEMPERATURE` | `0.7` | Sampling temperature (0.0 = deterministic, 1.0+ = creative) | サンプリング温度（0.0=決定的、1.0+=創造的） | 采样温度（0.0=确定性、1.0+=创造性） |
+| `CONTEXT_WINDOW` | `32768` | Context window size in tokens | コンテキストウィンドウサイズ（トークン数） | 上下文窗口大小（令牌数） |
+
+**Example / 例 / 示例:**
+```bash
+# ~/.config/vibe-local/config
+MODEL="qwen3:8b"
+SIDECAR_MODEL="qwen3:1.7b"
+OLLAMA_HOST="http://localhost:11434"
+MAX_TOKENS=8192
+TEMPERATURE=0.7
+CONTEXT_WINDOW=32768
+```
+
+### Environment Variables / 環境変数 / 环境变量
+
+**🇯🇵** 環境変数は設定ファイルより優先されます。CLIフラグは環境変数より優先されます。
+優先順位: CLIフラグ > 環境変数 > 設定ファイル > デフォルト値
+
+**🇺🇸** Environment variables override config file values. CLI flags override environment variables.
+Priority: CLI flags > Environment variables > Config file > Defaults
+
+**🇨🇳** 环境变量覆盖配置文件值。CLI标志覆盖环境变量。
+优先级: CLI标志 > 环境变量 > 配置文件 > 默认值
+
+| Variable | Description (EN) | 説明 (JP) | 说明 (CN) |
+|----------|------------------|-----------|-----------|
+| `OLLAMA_HOST` | Ollama API endpoint URL | Ollama APIエンドポイントURL | Ollama API端点URL |
+| `VIBE_CODER_MODEL` | Override main model (highest priority) | メインモデル上書き（最優先） | 覆盖主模型（最高优先级） |
+| `VIBE_LOCAL_MODEL` | Main model (set by launcher script) | メインモデル（ランチャーが設定） | 主模型（启动脚本设置） |
+| `VIBE_CODER_SIDECAR` | Override sidecar model (highest priority) | サイドカーモデル上書き（最優先） | 覆盖边车模型（最高优先级） |
+| `VIBE_LOCAL_SIDECAR_MODEL` | Sidecar model (set by launcher script) | サイドカーモデル（ランチャーが設定） | 边车模型（启动脚本设置） |
+| `VIBE_CODER_DEBUG` | Set to `1` to enable debug logging | `1`でデバッグログ有効化 | 设为`1`启用调试日志 |
+| `VIBE_LOCAL_DEBUG` | Set to `1` to enable debug logging (alias) | `1`でデバッグログ有効化（エイリアス） | 设为`1`启用调试日志（别名） |
+
+**🇯🇵** `VIBE_CODER_*` はユーザーが手動で設定する用途、`VIBE_LOCAL_*` はランチャースクリプト（vibe-local.sh）が自動設定する用途です。`VIBE_CODER_*` が `VIBE_LOCAL_*` より優先されます。
+
+**🇺🇸** `VIBE_CODER_*` variables are for manual user overrides. `VIBE_LOCAL_*` variables are set automatically by the launcher script (vibe-local.sh). `VIBE_CODER_*` takes priority over `VIBE_LOCAL_*`.
+
+**🇨🇳** `VIBE_CODER_*` 变量用于用户手动覆盖。`VIBE_LOCAL_*` 变量由启动脚本（vibe-local.sh）自动设置。`VIBE_CODER_*` 优先于 `VIBE_LOCAL_*`。
+
+---
 
 ## 🚨 Security / セキュリティ / 安全须知
 
@@ -465,7 +637,7 @@ Debug logs show `(sidecar)` for routed requests: `VIBE_LOCAL_DEBUG=1 vibe-local`
 
 > **⚠️ このツールは自己責任でご利用ください。AIが実行するコマンドには注意が必要です。**
 
-`vibe-local` は初回起動時に **ツール自動許可モード** (`--dangerously-skip-permissions`) を使うか確認します。
+`vibe-local` は通常モード（毎回確認）と自動許可モード（`-y`）を選べます。
 自動許可モードを選ぶと、AIがファイルの読み書き・コマンド実行・システム操作を **確認なしで** 実行します。
 
 **ローカルLLMはクラウドAIより精度が低いため、意図しない危険な操作を実行するリスクがあります。**
@@ -496,6 +668,18 @@ vibe-local        # 通常モード（推奨）：毎回確認あり
 vibe-local -y     # 自動許可モード（上級者向け・自己責任）
 ```
 
+#### 内部セキュリティ機構
+
+vibe-coder.py には以下のセキュリティ機構が組み込まれています：
+
+| 機構 | 説明 |
+|------|------|
+| **SAFE_TOOLS / ASK_TOOLS 分離** | `Read`, `Glob`, `Grep`, `SubAgent` は安全ツール（確認不要）。`Bash`, `Write`, `Edit`, `NotebookEdit` は要確認ツール。`WebFetch`, `WebSearch` はネットワークツール（追加コンテキスト付きで確認）。 |
+| **SSRF防止** | `OLLAMA_HOST` は localhost/127.0.0.1/::1 のみ許可。外部ホストを指定すると自動的にlocalhostにリセットされます。 |
+| **WebFetch スキーム検証** | `file://`, `ftp://`, `data://` などの危険なURLスキームをブロック。`http://` と `https://` のみ許可。 |
+| **セッションIDサニタイズ** | セッションIDから英数字・アンダースコア・ハイフン以外の文字を除去し、パストラバーサル攻撃を防止。 |
+| **最大反復回数制限** | エージェントループは最大50回で安全停止。 |
+
 ### 🌱 やさしい にほんご
 
 > **⚠️ だいじな おしらせ：AIは まちがえることが あります！**
@@ -512,7 +696,7 @@ AIが うごかそうとする コマンド（めいれい）を よく みて�
 
 > **⚠️ Use this tool at your own risk. Pay attention to the commands the AI executes.**
 
-On first launch, `vibe-local` asks whether to enable **auto-approve mode** (`--dangerously-skip-permissions`).
+`vibe-local` offers normal mode (confirms each action) and auto-approve mode (`-y`).
 In auto-approve mode, the AI can read/write files, execute commands, and modify your system **without asking**.
 
 **Local LLMs are less accurate than cloud AI — they may attempt dangerous operations unintentionally.**
@@ -543,11 +727,23 @@ vibe-local        # Normal mode (recommended): confirms each action
 vibe-local -y     # Auto-approve mode (advanced users only, at your own risk)
 ```
 
+#### Built-in Security Mechanisms
+
+vibe-coder.py includes the following security mechanisms:
+
+| Mechanism | Description |
+|-----------|-------------|
+| **SAFE_TOOLS vs ASK_TOOLS separation** | `Read`, `Glob`, `Grep`, `SubAgent` are safe tools (no confirmation needed). `Bash`, `Write`, `Edit`, `NotebookEdit` require user confirmation. `WebFetch`, `WebSearch` are network tools (confirmed with extra context). |
+| **SSRF prevention** | `OLLAMA_HOST` is restricted to localhost/127.0.0.1/::1 only. External hosts are automatically reset to localhost. |
+| **WebFetch scheme validation** | Blocks dangerous URL schemes (`file://`, `ftp://`, `data://`, etc.). Only `http://` and `https://` are permitted. |
+| **Session ID sanitization** | Strips all characters except alphanumerics, underscores, and hyphens from session IDs to prevent path traversal attacks. |
+| **Max iteration safety limit** | The agent loop stops after 50 iterations maximum. |
+
 ### 🇨🇳 中文
 
 > **⚠️ 使用本工具风险自负。请注意AI执行的每一个命令。**
 
-首次启动时，`vibe-local` 会询问是否启用 **工具自动批准模式** (`--dangerously-skip-permissions`)。
+`vibe-local` 提供普通模式（每次操作前确认）和自动批准模式（`-y`）。
 在自动批准模式下，AI可以读写文件、执行命令、修改系统，**无需确认**。
 
 **本地LLM的精度低于云端AI，可能意外执行危险操作。**
@@ -577,6 +773,18 @@ vibe-local -y     # Auto-approve mode (advanced users only, at your own risk)
 vibe-local        # 普通模式（推荐）：每次操作前确认
 vibe-local -y     # 自动批准模式（仅限高级用户，风险自负）
 ```
+
+#### 内置安全机制
+
+vibe-coder.py 包含以下安全机制：
+
+| 机制 | 说明 |
+|------|------|
+| **SAFE_TOOLS 与 ASK_TOOLS 分离** | `Read`、`Glob`、`Grep`、`SubAgent` 为安全工具（无需确认）。`Bash`、`Write`、`Edit`、`NotebookEdit` 需要用户确认。`WebFetch`、`WebSearch` 为网络工具（附加上下文确认）。 |
+| **SSRF防护** | `OLLAMA_HOST` 仅允许 localhost/127.0.0.1/::1。外部主机会自动重置为localhost。 |
+| **WebFetch 方案验证** | 阻止危险的URL方案（`file://`、`ftp://`、`data://` 等）。仅允许 `http://` 和 `https://`。 |
+| **会话ID清理** | 从会话ID中删除除字母数字、下划线和连字符之外的所有字符，防止路径遍历攻击。 |
+| **最大迭代安全限制** | 代理循环最多运行50次后自动停止。 |
 
 ---
 
@@ -693,52 +901,54 @@ vibe-local is optimized for offline environments:
 
 本ツールの法的性質を透明に説明します：
 
-**本ツールが行うこと：**
-- Claude Code CLI（Anthropic社が公開しているコマンドラインツール）を起動します
-- Claude Code が送信するAPIリクエストの宛先を、ローカルのプロキシサーバーに変更します（`ANTHROPIC_BASE_URL` 環境変数を利用）
-- プロキシサーバーがリクエストを変換し、ローカルで動作するOllama（オープンソースのLLMランタイム）に転送します
-- Anthropic社のサーバーへの通信は一切行いません
+**本ツールが行うこと（v0.8.0 vibe-coder）：**
+- 自作のPythonスクリプト `vibe-coder.py` がコーディングエージェントとして動作します
+- ローカルで動作するOllama（オープンソースのLLMランタイム）と直接通信します
+- 外部サーバーへの通信は一切行いません（Web検索・URLフェッチは任意機能）
+- Anthropic社のソフトウェアは一切使用しません
 
 **使用するソフトウェアのライセンス：**
-- **Claude Code CLI**: Anthropic社が提供するソフトウェア。利用にはAnthropicのアカウントが必要です
+- **vibe-coder.py**: vibe-local に含まれる完全OSSのエージェント（MIT License）
 - **Ollama**: MIT License のオープンソースソフトウェア
 - **Qwen3 モデル**: Apache 2.0 License で公開されているオープンソースモデル
 - **vibe-local**: MIT License
 
 **注意すべき点：**
-- Claude Code CLI を Anthropic API 以外のバックエンドで使用することは、Anthropic の利用規約（Terms of Service）で明示的に許可も禁止もされていない領域です
-- 本ツールは Anthropic のサービスに負荷をかけたり、APIキーを不正使用したりするものではありません
-- ユーザーは Anthropic の最新の利用規約を自身で確認する責任があります
+- 全コンポーネントがオープンソースライセンスで提供されています
 - 本ツールは研究・教育目的のユーティリティであり、商用利用を想定していません
+- ローカルLLMはクラウドAIより精度が低いため、意図しない操作のリスクがあります
+
+> **v0.2 以前**: Claude Code CLI + プロキシ方式を使用していました。v0.3.0 で完全自作に移行し、v0.8.0 で432テスト・14ツール・サブエージェント・画像対応まで到達しました。
 
 ### 🇺🇸 Legal Explanation
 
-**What this tool does:**
-- Launches the Claude Code CLI (a command-line tool published by Anthropic)
-- Redirects API requests to a local proxy server (using `ANTHROPIC_BASE_URL` environment variable)
-- The proxy translates requests and forwards them to Ollama (open-source LLM runtime) running locally
-- No communication with Anthropic's servers occurs
+**What this tool does (v0.8.0 vibe-coder):**
+- Runs `vibe-coder.py`, a fully open-source Python coding agent
+- Communicates directly with Ollama (open-source LLM runtime) running locally
+- No communication with external servers (Web search/fetch are optional features)
+- Does not use any Anthropic software
 
 **Software licenses:**
-- **Claude Code CLI**: Software provided by Anthropic. Requires an Anthropic account
+- **vibe-coder.py**: Fully OSS agent included in vibe-local (MIT License)
 - **Ollama**: Open-source software under MIT License
 - **Qwen3 models**: Open-source models under Apache 2.0 License
 - **vibe-local**: MIT License
 
 **Points to note:**
-- Using Claude Code CLI with a non-Anthropic backend is neither explicitly permitted nor prohibited in Anthropic's current Terms of Service
-- This tool does not place any load on Anthropic's services or misuse API keys
-- Users are responsible for reviewing Anthropic's current Terms of Service
+- All components are provided under open-source licenses
 - This tool is intended for research and education, not commercial use
+- Local LLMs are less accurate than cloud AI, posing risk of unintended operations
+
+> **v0.2 and earlier**: Used Claude Code CLI + proxy approach. v0.3.0 migrated to fully self-contained. v0.8.0 reached 432 tests, 14 tools, sub-agents, and image support.
 
 ---
 
 ## ⚙️ Notes
 
-- Local LLM accuracy is lower than Claude API
+- Local LLM accuracy is lower than cloud AI
 - First model download takes time (several GB to 20GB)
-- Use `vibe-local --auto` to auto-switch to Claude API when online
-- WebSearch/WebFetch tools require network (△ online only — WebSearch uses DuckDuckGo via proxy)
+- Use `vibe-local --auto` to auto-switch to Claude API when online (requires Claude CLI)
+- WebSearch/WebFetch tools require network (△ online only — WebSearch uses DuckDuckGo)
 - Large installs (MacTeX ~4GB, Xcode tools) take significant time
 
 ---
@@ -755,11 +965,10 @@ vibe-local is optimized for offline environments:
 ### 🇯🇵
 
 > **本プロジェクトは Anthropic 社とは一切関係ありません。**
-> Anthropic が提供・推奨・保証するものではありません。
 > 「Claude」は Anthropic, PBC の商標です。本プロジェクトは非公式のコミュニティツールです。
 >
-> 本ツールは Claude Code CLI を非標準の方法で使用しています（ローカルプロキシ経由でサードパーティLLMに接続）。
-> Claude Code CLI の利用規約に抵触する可能性があります。利用者は自身で利用規約を確認してください。
+> v0.3.0 以降、本ツールはプロプライエタリソフトウェアを使用していません。
+> 全コンポーネント（vibe-coder.py, Ollama, Qwen3モデル）はオープンソースライセンスです。
 >
 > 本ソフトウェアは現状有姿（AS IS）で提供され、明示的・暗示的を問わず、いかなる保証もありません。
 > 使用によって生じたいかなる損害についても、著者は一切責任を負いません。
@@ -770,10 +979,10 @@ vibe-local is optimized for offline environments:
 > **This project is NOT affiliated with, endorsed by, or associated with Anthropic.**
 > "Claude" is a trademark of Anthropic, PBC. This is an unofficial community tool.
 >
-> This tool uses the Claude Code CLI in a non-standard way (connecting to third-party LLMs via a local proxy).
-> This may not comply with the Claude Code CLI's terms of service. Users should review the terms themselves.
+> Since v0.3.0, this tool does not use any proprietary software.
+> All components (vibe-coder.py, Ollama, Qwen3 models) are open-source licensed.
 >
-> Third-party dependencies (Ollama, Qwen models, Node.js, etc.) have their own licenses and terms.
+> Third-party dependencies (Ollama, Qwen models, Python) have their own licenses and terms.
 >
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 > The authors are not liable for any damages arising from the use of this software.
@@ -782,12 +991,12 @@ vibe-local is optimized for offline environments:
 ### 🇨🇳
 
 > **本项目与 Anthropic 公司无任何关联。**
-> 非 Anthropic 提供、推荐或担保。"Claude"是 Anthropic, PBC 的商标。本项目是非官方社区工具。
+> "Claude"是 Anthropic, PBC 的商标。本项目是非官方社区工具。
 >
-> 本工具以非标准方式使用 Claude Code CLI（通过本地代理连接第三方LLM）。
-> 这可能不符合 Claude Code CLI 的服务条款。用户应自行确认相关条款。
+> 自v0.3.0起，本工具不使用任何专有软件。
+> 所有组件（vibe-coder.py、Ollama、Qwen3模型）均为开源许可。
 >
-> 第三方依赖（Ollama、Qwen模型、Node.js等）有各自的许可证和使用条款。
+> 第三方依赖（Ollama、Qwen模型、Python）有各自的许可证和使用条款。
 >
 > 本软件按"原样"提供，不提供任何明示或暗示的保证。
 > 作者不对因使用本软件而产生的任何损害承担责任。
