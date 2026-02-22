@@ -763,7 +763,9 @@ else
     vapor_warn "Ollama Server       → 🟡 $(msg standby)"
 fi
 
-python3 "$LIB_DIR/anthropic-ollama-proxy.py" 8083 &>/tmp/claude-local-test-proxy.log &
+TEST_STATE_DIR="${HOME}/.local/state/claude-local"
+mkdir -p "$TEST_STATE_DIR" && chmod 700 "$TEST_STATE_DIR"
+python3 "$LIB_DIR/anthropic-ollama-proxy.py" 8083 &>"${TEST_STATE_DIR}/test-proxy.log" &
 TEST_PID=$!
 sleep 2
 

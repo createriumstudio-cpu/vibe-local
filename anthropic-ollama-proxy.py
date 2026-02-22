@@ -20,8 +20,9 @@ import traceback
 
 OLLAMA_BASE = "http://localhost:11434"
 PROXY_PORT = 8082
-LOG_DIR = "/tmp/proxy-debug"
-os.makedirs(LOG_DIR, exist_ok=True)
+# [H3/L4 fix] Log to user-private directory with restricted permissions
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "state", "claude-local", "proxy-debug")
+os.makedirs(LOG_DIR, mode=0o700, exist_ok=True)
 
 # === Optimization settings for local LLM ===
 # Max tokens cap (Claude Code sends 32000 which is way too much for 30B model)
@@ -397,10 +398,10 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
                 content_text = cleaned
                 finish_reason = "tool_calls"
 
+        # [H3 fix] Do not log content preview - may contain sensitive code/data
         _log("resp_parsed", {
             "has_content": bool(content_text),
             "content_length": len(content_text),
-            "content_preview": content_text[:300] if content_text else "",
             "has_reasoning": bool(reasoning_text),
             "has_tool_calls": bool(tool_calls),
             "tool_call_count": len(tool_calls),
@@ -413,7 +414,12 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
     def _handle_sync(self, oai_request, model):
         resp = urllib.request.urlopen(oai_request, timeout=300)
         oai_resp = json.loads(resp.read())
-        _log("resp_from_ollama_sync", oai_resp)
+        # [H3 fix] Log metadata only, not full response content
+        _log("resp_from_ollama_sync_meta", {
+            "model": oai_resp.get("model"),
+            "usage": oai_resp.get("usage"),
+            "choices_count": len(oai_resp.get("choices", [])),
+        })
 
         content_text, reasoning_text, tool_calls, finish_reason = self._process_ollama_response(oai_resp)
 
@@ -457,7 +463,11 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
     def _handle_sync_as_sse(self, oai_request, model):
         resp = urllib.request.urlopen(oai_request, timeout=300)
         oai_resp = json.loads(resp.read())
-        _log("resp_from_ollama_sse", oai_resp)
+        _log("resp_from_ollama_sse_meta", {
+            "model": oai_resp.get("model"),
+            "usage": oai_resp.get("usage"),
+            "choices_count": len(oai_resp.get("choices", [])),
+        })
 
         content_text, reasoning_text, tool_calls, finish_reason = self._process_ollama_response(oai_resp)
 

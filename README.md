@@ -332,11 +332,56 @@ claude-local -y     # 跳过确认（自动批准模式）
 
 ---
 
-## ⚠️ Other Notes
+## ⚙️ Notes
 
 - Local LLM accuracy is lower than Claude API
 - First model download takes time (several GB to 20GB)
 - Use `claude-local --auto` to auto-switch to Claude API when online
+
+---
+
+## 📜 Disclaimer / 免責事項 / 免责声明
+
+### 🇯🇵
+
+> **本プロジェクトは Anthropic 社とは一切関係ありません。**
+> Anthropic が提供・推奨・保証するものではありません。
+> 「Claude」は Anthropic, PBC の商標です。本プロジェクトは非公式のコミュニティツールです。
+>
+> 本ツールは Claude Code CLI を非標準の方法で使用しています（ローカルプロキシ経由でサードパーティLLMに接続）。
+> Claude Code CLI の利用規約に抵触する可能性があります。利用者は自身で利用規約を確認してください。
+>
+> 本ソフトウェアは現状有姿（AS IS）で提供され、明示的・暗示的を問わず、いかなる保証もありません。
+> 使用によって生じたいかなる損害についても、著者は一切責任を負いません。
+> **すべて自己責任でご利用ください。**
+
+### 🇺🇸
+
+> **This project is NOT affiliated with, endorsed by, or associated with Anthropic.**
+> "Claude" is a trademark of Anthropic, PBC. This is an unofficial community tool.
+>
+> This tool uses the Claude Code CLI in a non-standard way (connecting to third-party LLMs via a local proxy).
+> This may not comply with the Claude Code CLI's terms of service. Users should review the terms themselves.
+>
+> Third-party dependencies (Ollama, Qwen models, Node.js, etc.) have their own licenses and terms.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+> The authors are not liable for any damages arising from the use of this software.
+> **Use entirely at your own risk.**
+
+### 🇨🇳
+
+> **本项目与 Anthropic 公司无任何关联。**
+> 非 Anthropic 提供、推荐或担保。"Claude"是 Anthropic, PBC 的商标。本项目是非官方社区工具。
+>
+> 本工具以非标准方式使用 Claude Code CLI（通过本地代理连接第三方LLM）。
+> 这可能不符合 Claude Code CLI 的服务条款。用户应自行确认相关条款。
+>
+> 第三方依赖（Ollama、Qwen模型、Node.js等）有各自的许可证和使用条款。
+>
+> 本软件按"原样"提供，不提供任何明示或暗示的保证。
+> 作者不对因使用本软件而产生的任何损害承担责任。
+> **使用本工具风险完全自负。**
 
 ## 📄 License
 

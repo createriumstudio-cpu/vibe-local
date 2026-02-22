@@ -3,15 +3,23 @@
 # ローカルLLM (Ollama) で Claude Code を起動するスクリプト
 # Anthropic API → Ollama 変換プロキシを自動管理
 #
+# NOTE: This project is NOT affiliated with, endorsed by, or associated with Anthropic.
+#
 # 使い方:
 #   claude-local                    # インタラクティブモード
 #   claude-local -p "質問"          # ワンショット
 #   claude-local --auto             # ネットワーク状況で自動判定
 #   claude-local --model qwen3:8b   # モデル手動指定
+#   claude-local -y                 # パーミッション確認スキップ (自己責任)
 
 set -euo pipefail
 
-# --- 設定読み込み ---
+# --- ディレクトリ初期化 ---
+STATE_DIR="${HOME}/.local/state/claude-local"
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+
+# --- 設定読み込み (安全なパーサー) ---
 CONFIG_FILE="${HOME}/.config/claude-local/config"
 PROXY_LIB_DIR="${HOME}/.local/lib/claude-local"
 PROXY_SCRIPT="${PROXY_LIB_DIR}/anthropic-ollama-proxy.py"
@@ -21,10 +29,16 @@ MODEL=""
 OLLAMA_HOST="http://localhost:11434"
 PROXY_PORT=8082
 
-# config ファイルがあれば読み込み
+# [C1 fix] source ではなく grep で既知キーのみ安全に読む
 if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck source=/dev/null
-    source "$CONFIG_FILE"
+    _val() { grep -E "^${1}=" "$CONFIG_FILE" 2>/dev/null | head -1 | sed "s/^${1}=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}/\1/" || true; }
+    _m="$(_val MODEL)"
+    _p="$(_val PROXY_PORT)"
+    _h="$(_val OLLAMA_HOST)"
+    [ -n "$_m" ] && MODEL="$_m"
+    [ -n "$_p" ] && PROXY_PORT="$_p"
+    [ -n "$_h" ] && OLLAMA_HOST="$_h"
+    unset _val _m _p _h
 fi
 
 # config が無い場合、RAM からモデルを自動判定
@@ -48,11 +62,11 @@ if [ -z "$MODEL" ]; then
 fi
 
 PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
-PROXY_PID_FILE="/tmp/anthropic-ollama-proxy.pid"
+# [M4 fix] PIDファイルをユーザープライベートディレクトリに
+PROXY_PID_FILE="${STATE_DIR}/proxy.pid"
 
 # --- 開発時フォールバック: プロキシスクリプトの探索 ---
 if [ ! -f "$PROXY_SCRIPT" ]; then
-    # install.sh 実行前でも動くように、同じディレクトリから探す
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -f "${SCRIPT_DIR}/anthropic-ollama-proxy.py" ]; then
         PROXY_SCRIPT="${SCRIPT_DIR}/anthropic-ollama-proxy.py"
@@ -105,7 +119,8 @@ ensure_proxy() {
     fi
 
     echo "🔄 Anthropic→Ollama 変換プロキシを起動中..."
-    python3 "$PROXY_SCRIPT" "$PROXY_PORT" &>/tmp/claude-local-proxy.log &
+    # [M5 fix] ログをプライベートディレクトリに
+    python3 "$PROXY_SCRIPT" "$PROXY_PORT" &>"${STATE_DIR}/proxy.log" &
     local pid=$!
     echo "$pid" > "$PROXY_PID_FILE"
 
@@ -121,7 +136,7 @@ ensure_proxy() {
     echo ""
     echo "対処法:"
     echo "  python3 がインストールされているか確認: python3 --version"
-    echo "  ログを確認: cat /tmp/claude-local-proxy.log"
+    echo "  ログを確認: cat ${STATE_DIR}/proxy.log"
     return 1
 }
 
@@ -141,7 +156,6 @@ trap cleanup EXIT
 
 # --- 引数パース ---
 AUTO_MODE=0
-SKIP_PERMISSIONS=""
 YES_FLAG=0
 EXTRA_ARGS=()
 
@@ -206,16 +220,19 @@ ensure_proxy || exit 1
 # ローカルLLMは精度が低いため、意図しないコマンドが実行される可能性がある。
 # ユーザーに明示的に確認を取る。
 
+# [H4 fix] 配列で安全に管理
+PERM_ARGS=()
+
 if [ "$YES_FLAG" -eq 1 ]; then
-    SKIP_PERMISSIONS="--dangerously-skip-permissions"
+    PERM_ARGS+=(--dangerously-skip-permissions)
 else
     echo ""
     echo "============================================"
     echo " ⚠️  パーミッション確認 / Permission Check"
     echo "============================================"
     echo ""
-    echo " claude-local はデフォルトでツール自動許可モード"
-    echo " (--dangerously-skip-permissions) で起動します。"
+    echo " claude-local はツール自動許可モード"
+    echo " (--dangerously-skip-permissions) で起動できます。"
     echo ""
     echo " This means the AI can execute commands, read/write"
     echo " files, and modify your system WITHOUT asking."
@@ -229,29 +246,29 @@ else
     echo " 本地LLM精度较低，可能执行非预期操作。"
     echo ""
     echo "--------------------------------------------"
-    echo " [Y] 自動許可モード (Auto-approve all tools)"
-    echo " [n] 通常モード (Ask before each tool use)"
+    echo " [y] 自動許可モード (Auto-approve all tools)"
+    echo " [N] 通常モード (Ask before each tool use)"
     echo "--------------------------------------------"
     echo ""
-    printf " 続行しますか？ / Continue? [Y/n]: "
-    read -r REPLY </dev/tty 2>/dev/null || read -r REPLY 2>/dev/null || REPLY="Y"
+    # [C2 fix] デフォルトを安全側 (N) に変更
+    printf " 続行しますか？ / Continue? [y/N]: "
+    read -r REPLY </dev/tty 2>/dev/null || read -r REPLY 2>/dev/null || REPLY="n"
     echo ""
 
     case "$REPLY" in
-        [nN]|[nN][oO]|いいえ|否)
-            SKIP_PERMISSIONS=""
-            echo " → 通常モード (毎回確認) で起動します"
+        [yY]|[yY][eE][sS]|はい|是)
+            PERM_ARGS+=(--dangerously-skip-permissions)
+            echo " → 自動許可モードで起動します"
             ;;
         *)
-            SKIP_PERMISSIONS="--dangerously-skip-permissions"
-            echo " → 自動許可モードで起動します"
+            echo " → 通常モード (毎回確認) で起動します"
             ;;
     esac
 fi
 
-PERM_LABEL="ツール自動許可 (auto-approve)"
-if [ -z "$SKIP_PERMISSIONS" ]; then
-    PERM_LABEL="通常モード (ask each time)"
+PERM_LABEL="通常モード (ask each time)"
+if [ ${#PERM_ARGS[@]} -gt 0 ]; then
+    PERM_LABEL="ツール自動許可 (auto-approve)"
 fi
 
 echo ""
@@ -265,4 +282,4 @@ echo ""
 
 ANTHROPIC_BASE_URL="$PROXY_URL" \
 ANTHROPIC_API_KEY="local" \
-exec claude --model "$MODEL" $SKIP_PERMISSIONS "${EXTRA_ARGS[@]}"
+exec claude --model "$MODEL" "${PERM_ARGS[@]}" "${EXTRA_ARGS[@]}"
