@@ -186,7 +186,7 @@ ensure_proxy() {
     VIBE_LOCAL_MODEL="$MODEL" \
     VIBE_LOCAL_SIDECAR_MODEL="${SIDECAR_MODEL:-$MODEL}" \
     VIBE_LOCAL_DEBUG="$VIBE_LOCAL_DEBUG" \
-    python3 "$PROXY_SCRIPT" "$PROXY_PORT" &>"$PROXY_LOG" &
+    python3 "$PROXY_SCRIPT" "$PROXY_PORT" >>"$PROXY_LOG" 2>&1 &
     local pid=$!
     echo "$pid" > "$PROXY_PID_FILE"
 

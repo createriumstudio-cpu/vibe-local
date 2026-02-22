@@ -1,0 +1,140 @@
+# vibe-local Improvement Roadmap
+
+> Last updated: 2026-02-22
+> Based on debug sessions: session_20260222_160817 (94 req), session_20260222_164340 (11 req), session_20260222_164837 (47 req)
+
+## Current State (v0.1)
+
+Working:
+- Dual-model routing (qwen3-coder:30b + qwen3:8b sidecar)
+- macOS environment injection (brew, /Users/, system_profiler)
+- Proxy auto-restart on code update (mtime detection)
+- Tool filtering (20 → 9 essential tools)
+- XML tool call fallback
+- Zero crashes, zero errors in proxy
+- Speed test via curl example works
+- HTML preferred over pygame for GUI
+
+## P0 — Critical (Breaks User Experience)
+
+### P0-1: Response verbosity / TOOL FIRST not effective enough
+**Status**: IN PROGRESS
+**Impact**: Every response has unnecessary explanation
+**Evidence**:
+- "回線速度を測定するには、専用のツールが必要です。まずは、そのツールをインストールしてみますか？" (should just `brew install`)
+- "はい、Gitにアクセスできます。現在の状態では..." (4 bullet points nobody asked for)
+- "Python3がインストールされており..." (3 lines of explanation for `python3 --version`)
+
+**Fix**: Strengthen system prompt: "ZERO preamble text before tool calls. After tool result, reply in 1 sentence MAX. NEVER ask follow-up questions."
+
+### P0-2: Follow-up questions after every action
+**Status**: IN PROGRESS
+**Impact**: Model asks "何か特定の操作が必要ですか？" after EVERY response
+**Evidence**: Appears 4 times in one session
+**Fix**: Add rule "NEVER end with a question. Wait for user's next instruction."
+
+### P0-3: Won't run commands for user
+**Status**: IN PROGRESS
+**Impact**: Tells user to run commands instead of using Bash tool
+**Evidence**: "ゲームを実行するには、以下のコマンドをターミナルで実行してください" instead of `Bash(python3 minesweeper.py)`
+**Fix**: Add rule "ALWAYS execute commands yourself using Bash. NEVER tell user to run commands."
+
+### P0-4: curl URL quoting (zsh glob)
+**Status**: IN PROGRESS
+**Impact**: URLs with `?` fail on first try in zsh
+**Evidence**: `no matches found: https://speed.cloudflare.com/__down?bytes=10000000`
+**Fix**: Update speed test example with quoted URL. Add rule "ALWAYS quote URLs containing ? or & in Bash commands."
+
+### P0-5: `\\n` literal in curl output
+**Status**: IN PROGRESS
+**Impact**: curl -w format shows `\\n` as text instead of newline
+**Evidence**: `速度: 62497265 bytes/sec\\nダウンロード時間: 0.160007s\\n`
+**Fix**: Fix speed test example to use `$'\n'` or avoid newlines entirely.
+
+## P1 — High (Functional Issues)
+
+### P1-1: Auto-install dependencies
+**Status**: TODO
+**Impact**: Won't install pygame before running, tells user to do it
+**Evidence**: "Pygameライブラリがインストールされている必要があります" → should `pip3 install pygame` first
+**Fix**: Add rule "Install missing dependencies with pip3/brew BEFORE running scripts."
+
+### P1-2: stdin limitation awareness
+**Status**: TODO
+**Impact**: Runs scripts with `input()` via Bash → EOFError
+**Evidence**: minesweeper.py with `input()` → `EOFError: EOF when reading a line`
+**Fix**: Add rule "Scripts with input()/stdin CANNOT run in Bash. Use GUI (pygame/HTML) or rewrite to accept args."
+
+### P1-3: Don't give up on errors
+**Status**: TODO
+**Impact**: Model suggests going back to browser version instead of fixing Python version
+**Evidence**: "代わりに、ブラウザ版のマインスイーパを使用してください" after one error
+**Fix**: Already partially in prompt ("If a tool fails, try alternative"), strengthen with "NEVER suggest user do something else. Fix the problem."
+
+### P1-4: Mixed language output
+**Status**: TODO
+**Impact**: Chinese characters randomly appear in Japanese responses
+**Evidence**: "是非" (Chinese context), "或者" (Chinese conjunction)
+**Fix**: Add "Reply in the SAME language as the user. If user writes Japanese, reply in Japanese only."
+
+## P2 — Medium (System/Proxy Improvements)
+
+### P2-1: Sidecar cold start (18.5s)
+**Status**: TODO
+**Impact**: First sidecar request takes 18s while model loads into VRAM
+**Fix**: Send warmup request to both models on proxy startup. Estimated code: 15 lines.
+
+### P2-2: Proxy log overwrite
+**Status**: TODO
+**Impact**: proxy.log loses previous session data on restart
+**Fix**: Use append mode (`>>`) in vibe-local.sh instead of overwrite (`>`)
+
+### P2-3: env_injected tracking in debug
+**Status**: TODO
+**Impact**: Cannot audit environment injection from debug files
+**Fix**: Add `env_injected` field to req_meta log output. Estimated: 3 lines.
+
+### P2-4: Prompt token growth unbounded
+**Status**: TODO
+**Impact**: In 94-request sessions, prompt grows from 8K to 12.6K tokens
+**Risk**: May exceed model context window in very long sessions
+**Fix**: Consider conversation truncation strategy (drop old tool results, keep system + last N turns)
+
+### P2-5: Write tool latency (30-46s)
+**Status**: ACCEPTED (inherent to 30B model)
+**Impact**: Large file writes take 30-46 seconds
+**Mitigation**: Could chunk writes, but complexity vs benefit is low
+
+## P3 — Nice to Have
+
+### P3-1: Tool variety
+**Status**: TODO
+**Impact**: Model only uses Bash/Write, rarely Read/Glob/Grep
+**Fix**: Better tool guide examples in prompt
+
+### P3-2: Native streaming for tool-use
+**Status**: TODO
+**Impact**: Currently forces sync mode for tool requests (sync-as-SSE)
+**Fix**: Investigate if Ollama supports streaming with function calling
+
+### P3-3: Empty session directory cleanup
+**Status**: TODO
+**Impact**: 6 empty dirs from rapid restarts
+**Fix**: Don't create session dir until first request, or cleanup on shutdown
+
+### P3-4: Legacy debug file migration
+**Status**: TODO
+**Impact**: ~189 files in root proxy-debug/ from before session dirs
+**Fix**: One-time cleanup script
+
+## Metrics to Track
+
+| Metric | Session 1 (pre-fix) | Session 2 (post-fix) | Target |
+|--------|---------------------|---------------------|--------|
+| Text-only responses | 53% | ~40% | <20% |
+| Linux-isms | 7 | 0 | 0 |
+| "I cannot" patterns | 3 | 0 | 0 |
+| Follow-up questions | N/A | 4 | 0 |
+| Tool variety (unique) | 3/9 | 3/9 | 5/9 |
+| Avg response length | ~200 chars | ~150 chars | <80 chars |
+| Sidecar cold start | 18.5s | 18.5s | <2s |

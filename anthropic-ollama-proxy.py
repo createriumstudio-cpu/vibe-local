@@ -88,29 +88,41 @@ SIDECAR_TIMEOUT = 60
 SYSTEM_PROMPT_MAX_CHARS = 4000
 
 # Curated local model system prompt (replaces truncated Claude Code system prompt)
-LOCAL_SYSTEM_PROMPT = """You are a coding assistant running on a local LLM via Ollama.
+LOCAL_SYSTEM_PROMPT = """You are a coding assistant. You EXECUTE tasks using tools. You do NOT explain or teach.
 
-RULES:
-1. TOOL FIRST, TALK LATER. Call a tool IMMEDIATELY. Explain AFTER you get the result. MAX 2 sentences.
-2. NEVER say "I cannot do this" — try it first with a tool.
-3. NEVER write tutorials, numbered lists, or bullet-point options. Just execute.
-4. If a tool fails, try an alternative tool or command. Do NOT give up and output text.
-5. If Write fails, check the error path and retry with the correct absolute path.
-6. For web pages, if WebFetch fails, try Bash(curl -s URL) as fallback.
-7. For GUI apps, prefer HTML/JS (works in any browser) over pygame/tkinter (needs pip install).
-8. NEVER use sudo unless the user explicitly asks for it.
+ABSOLUTE RULES:
+1. TOOL FIRST. Call a tool with ZERO preamble text. No explanation before the tool call.
+2. After tool result, reply in 1 sentence MAX. NEVER use bullet points or numbered lists.
+3. NEVER end your response with a question. Wait for the user's next message.
+4. NEVER say "I cannot" or "I'm unable" — always try with a tool first.
+5. NEVER tell the user to run a command. YOU run it with Bash.
+6. If a tool fails, try a different approach. NEVER give up or suggest the user do it manually.
+7. Install dependencies BEFORE running: pip3 install X first, THEN python3 script.py.
+8. Scripts using input()/stdin CANNOT run in Bash (EOFError). Use GUI (HTML/JS, pygame) or CLI args instead.
+9. For GUI apps, prefer HTML/JS (open in browser) over pygame/tkinter.
+10. NEVER use sudo unless the user explicitly asks.
+11. Reply in the SAME language as the user's message.
+12. In Bash, ALWAYS quote URLs containing ? or & with single quotes.
 
-Tool guide:
-- Bash: Shell commands. Use for: ls, git, npm, pip, python3, curl, brew, open, etc.
-- Read: Read files. Use INSTEAD of cat/head/tail.
-- Write: Create files. ALWAYS use absolute paths from the Environment section below.
-- Edit: Modify files. old_string must exactly match.
-- Glob: Find files by pattern. Use INSTEAD of find.
-- Grep: Search file contents. Use INSTEAD of grep/rg.
-- WebFetch: Fetch URL content.
-- WebSearch: Web search.
+WRONG: "回線速度を測定するには専用のツールが必要です。インストールしてみますか？"
+RIGHT: [immediately call Bash with the speed test command]
 
-Speed test example: Bash(curl -o /dev/null -s -w 'Download: %{speed_download} bytes/sec\\nTime: %{time_total}s\\n' https://speed.cloudflare.com/__down?bytes=10000000)
+WRONG: "ゲームを実行するには、ターミナルで以下のコマンドを実行してください"
+RIGHT: [call Bash(python3 /path/to/game.py)]
+
+WRONG: "何か特定の操作が必要ですか？"
+RIGHT: [say nothing, wait for user]
+
+Tools:
+- Bash: Run commands (ls, git, npm, pip3, python3, curl, brew, open...)
+- Read: Read files (NOT cat/head/tail)
+- Write: Create files (ALWAYS absolute paths)
+- Edit: Modify files (old_string must match exactly)
+- Glob: Find files (NOT find command)
+- Grep: Search contents (NOT grep/rg command)
+- WebFetch/WebSearch: Web access
+
+Speed test: Bash(curl -o /dev/null -s -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=10000000')
 """
 
 
@@ -431,6 +443,7 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
             "system_length": len(str(system)),
             "max_tokens": max_tokens,
             "max_tokens_original": req.get("max_tokens", 4096),
+            "env_injected": False,  # updated below if injected
         }, req_id=req_id)
 
         # Debug: log full Anthropic request
@@ -502,6 +515,15 @@ class AnthropicToOllamaHandler(http.server.BaseHTTPRequestHandler):
                     if len(user_instructions) > max_user > 0:
                         user_instructions = user_instructions[:max_user] + "\n...(truncated)"
                     sys_text += "\n# Project Instructions\n" + user_instructions + "\n"
+                # Update req_meta with env injection status
+                _log("env_status", {
+                    "env_injected": bool(env_info),
+                    "platform": env_info.get("platform", ""),
+                    "cwd": env_info.get("cwd", ""),
+                    "prompt_len_before": original_sys_len,
+                    "prompt_len_after": len(sys_text),
+                    "has_user_instructions": bool(user_instructions),
+                }, req_id=req_id)
                 print(f"[proxy] System prompt replaced: {original_sys_len} -> {len(sys_text)} chars (env: {bool(env_info)})")
 
             if has_tools:
@@ -1056,6 +1078,19 @@ def main():
 
     # Cleanup old sessions on startup
     _cleanup_old_sessions(7)
+
+    # Warmup: preload both models into VRAM to avoid cold-start latency
+    def _warmup():
+        for m in set([MAIN_MODEL, SIDECAR_MODEL]):
+            try:
+                body = json.dumps({"model": m, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1, "stream": False}).encode()
+                req = urllib.request.Request(f"{OLLAMA_BASE}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=120)
+                print(f"[proxy] Warmup OK: {m}")
+            except Exception as e:
+                print(f"[proxy] Warmup failed for {m}: {e}")
+    warmup_thread = threading.Thread(target=_warmup, daemon=True)
+    warmup_thread.start()
 
     try:
         server.serve_forever()
