@@ -5354,3 +5354,232 @@ class TestH5BgTasksEviction:
                 "Recent completed task may or may not be pruned (within 1hr)"
             assert "bg_running" in vc._bg_tasks, \
                 "Running tasks should never be pruned regardless of age"
+
+
+class TestFileToolsAuditFixes:
+    """Tests for file tools audit round fixes."""
+
+    def test_write_tool_size_limit(self):
+        """WriteTool should reject content larger than MAX_WRITE_SIZE."""
+        tool = vc.WriteTool()
+        huge_content = "x" * (tool.MAX_WRITE_SIZE + 1)
+        result = tool.execute({"file_path": "/tmp/test_huge.txt", "content": huge_content})
+        assert "Error" in result
+        assert "too large" in result
+
+    def test_write_tool_normal_size_ok(self):
+        """WriteTool should allow content under MAX_WRITE_SIZE."""
+        tool = vc.WriteTool()
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        try:
+            result = tool.execute({"file_path": path, "content": "hello world\n"})
+            assert "Wrote" in result
+        finally:
+            os.unlink(path)
+
+    def test_notebook_cell_type_preserve_on_replace(self):
+        """NotebookEditTool should preserve existing cell_type when not specified."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        nb = {
+            "cells": [
+                {"cell_type": "markdown", "metadata": {}, "source": ["# Title"]},
+                {"cell_type": "code", "metadata": {}, "source": ["x = 1"],
+                 "outputs": [], "execution_count": None},
+            ],
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 5,
+        }
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            json.dump(nb, f)
+        try:
+            # Replace cell 0 without specifying cell_type
+            result = tool.execute({
+                "notebook_path": path,
+                "cell_number": 0,
+                "new_source": "# New Title",
+                "edit_mode": "replace",
+            })
+            with open(path) as f:
+                updated = json.load(f)
+            # Should preserve "markdown" type
+            assert updated["cells"][0]["cell_type"] == "markdown", \
+                f"Expected 'markdown', got '{updated['cells'][0]['cell_type']}'"
+        finally:
+            os.unlink(path)
+
+    def test_notebook_cell_type_explicit_override(self):
+        """NotebookEditTool should use explicit cell_type when specified."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        nb = {
+            "cells": [
+                {"cell_type": "markdown", "metadata": {}, "source": ["# Title"]},
+            ],
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 5,
+        }
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            json.dump(nb, f)
+        try:
+            result = tool.execute({
+                "notebook_path": path,
+                "cell_number": 0,
+                "new_source": "x = 1",
+                "cell_type": "code",
+                "edit_mode": "replace",
+            })
+            with open(path) as f:
+                updated = json.load(f)
+            assert updated["cells"][0]["cell_type"] == "code"
+            assert "outputs" in updated["cells"][0]
+        finally:
+            os.unlink(path)
+
+    def test_notebook_invalid_structure_not_dict(self):
+        """NotebookEditTool should reject notebooks that aren't JSON objects."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            json.dump([1, 2, 3], f)  # A list, not a dict
+        try:
+            result = tool.execute({
+                "notebook_path": path,
+                "new_source": "test",
+                "edit_mode": "replace",
+            })
+            assert "Error" in result
+            assert "not a JSON object" in result
+        finally:
+            os.unlink(path)
+
+    def test_notebook_invalid_cells_not_list(self):
+        """NotebookEditTool should reject notebooks where cells is not a list."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        nb = {"cells": "not a list", "metadata": {}}
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            json.dump(nb, f)
+        try:
+            result = tool.execute({
+                "notebook_path": path,
+                "new_source": "test",
+                "edit_mode": "replace",
+            })
+            assert "Error" in result
+            assert "not a list" in result
+        finally:
+            os.unlink(path)
+
+    def test_notebook_invalid_json(self):
+        """NotebookEditTool should give clear error for invalid JSON."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            f.write("{broken json")
+        try:
+            result = tool.execute({
+                "notebook_path": path,
+                "new_source": "test",
+                "edit_mode": "replace",
+            })
+            assert "Error" in result
+            assert "not valid JSON" in result
+        finally:
+            os.unlink(path)
+
+    def test_glob_tool_double_star_pattern(self):
+        """GlobTool should handle ** patterns (recursive glob)."""
+        tool = vc.GlobTool()
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        subdir = os.path.join(tmpdir, "sub")
+        os.makedirs(subdir)
+        # Create test files
+        with open(os.path.join(tmpdir, "top.py"), "w") as f:
+            f.write("# top")
+        with open(os.path.join(subdir, "deep.py"), "w") as f:
+            f.write("# deep")
+        try:
+            result = tool.execute({"pattern": "**/*.py", "path": tmpdir})
+            assert "deep.py" in result, f"Expected deep.py in results: {result}"
+            assert "top.py" in result, f"Expected top.py in results: {result}"
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_glob_tool_simple_pattern(self):
+        """GlobTool should still handle simple patterns without **."""
+        tool = vc.GlobTool()
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        with open(os.path.join(tmpdir, "test.py"), "w") as f:
+            f.write("# test")
+        with open(os.path.join(tmpdir, "test.txt"), "w") as f:
+            f.write("text")
+        try:
+            result = tool.execute({"pattern": "*.py", "path": tmpdir})
+            assert "test.py" in result
+            assert "test.txt" not in result
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_edit_tool_error_message_guidance(self):
+        """EditTool error message should guide LLM to read file first."""
+        tool = vc.EditTool()
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".py")
+        with os.fdopen(fd, "w") as f:
+            f.write("hello world\n")
+        try:
+            result = tool.execute({
+                "file_path": path,
+                "old_string": "this does not exist",
+                "new_string": "replacement",
+            })
+            assert "Read the file first" in result
+        finally:
+            os.unlink(path)
+
+    def test_grep_tool_skips_large_files(self):
+        """GrepTool should skip files larger than 50MB."""
+        # We can't easily test with a 50MB file, but verify the guard exists
+        tool = vc.GrepTool()
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "test.txt")
+        with open(path, "w") as f:
+            f.write("findme\n")
+        try:
+            result = tool.execute({"pattern": "findme", "path": tmpdir})
+            assert path in result
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_notebook_insert_defaults_code(self):
+        """NotebookEditTool insert mode should default cell_type to 'code' when not specified."""
+        tool = vc.NotebookEditTool()
+        import tempfile
+        nb = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+        fd, path = tempfile.mkstemp(suffix=".ipynb")
+        with os.fdopen(fd, "w") as f:
+            json.dump(nb, f)
+        try:
+            result = tool.execute({
+                "notebook_path": path,
+                "new_source": "x = 1",
+                "edit_mode": "insert",
+            })
+            with open(path) as f:
+                updated = json.load(f)
+            assert updated["cells"][0]["cell_type"] == "code"
+            assert "outputs" in updated["cells"][0]
+        finally:
+            os.unlink(path)

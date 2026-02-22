@@ -1285,12 +1285,17 @@ class WriteTool(Tool):
         "required": ["file_path", "content"],
     }
 
+    MAX_WRITE_SIZE = 10 * 1024 * 1024  # 10MB write size limit
+
     def execute(self, params):
         file_path = params.get("file_path", "")
         content = params.get("content", "")
 
         if not file_path:
             return "Error: no file_path provided"
+        if len(content) > self.MAX_WRITE_SIZE:
+            return (f"Error: content too large ({len(content) // 1_000_000}MB). "
+                    f"Max write size is {self.MAX_WRITE_SIZE // (1024*1024)}MB. Split into smaller writes.")
         if not os.path.isabs(file_path):
             file_path = os.path.join(os.getcwd(), file_path)
 
@@ -1428,7 +1433,7 @@ class EditTool(Tool):
             norm_old = unicodedata.normalize("NFC", old_string)
             count = norm_content.count(norm_old)
             if count == 0:
-                return "Error: old_string not found in file"
+                return "Error: old_string not found in file. Read the file first to verify exact content, including whitespace and indentation."
             used_normalized = True
         if count > 1 and not replace_all:
             return (f"Error: old_string found {count} times. "
@@ -1536,42 +1541,12 @@ class GlobTool(Tool):
         if not os.path.isabs(base):
             base = os.path.join(os.getcwd(), base)
 
-        # Use os.walk with early dir pruning (fast, skips node_modules/.git early)
         # Bounded heap to avoid collecting millions of matches into memory
         heap = []  # min-heap of (mtime, path) — keeps newest MAX_RESULTS items
         total_found = 0
-        seen_dirs = set()  # prevent symlink loops
 
-        try:
-            for root, dirs, files in os.walk(base, followlinks=False):
-                # Detect symlink cycles
-                try:
-                    real_root = os.path.realpath(root)
-                    if real_root in seen_dirs:
-                        dirs[:] = []
-                        continue
-                    seen_dirs.add(real_root)
-                except OSError:
-                    pass
-                # Prune directories BEFORE descending (crucial for performance)
-                dirs[:] = [d for d in dirs if d not in self.SKIP_DIRS]
-                for name in files:
-                    full = os.path.join(root, name)
-                    rel = os.path.relpath(full, base)
-                    if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(name, pattern):
-                        try:
-                            mtime = os.path.getmtime(full)
-                        except OSError:
-                            mtime = 0
-                        total_found += 1
-                        if len(heap) < self.MAX_RESULTS:
-                            heapq.heappush(heap, (mtime, full))
-                        elif mtime > heap[0][0]:
-                            heapq.heapreplace(heap, (mtime, full))
-        except PermissionError:
-            pass
-        except Exception:
-            # Fallback to pathlib.glob for complex patterns (e.g. **/*)
+        # Use pathlib.glob for ** patterns (fnmatch doesn't support **)
+        if "**" in pattern:
             try:
                 base_path = Path(base)
                 for full_path in base_path.glob(pattern):
@@ -1590,6 +1565,35 @@ class GlobTool(Tool):
                     elif mtime > heap[0][0]:
                         heapq.heapreplace(heap, (mtime, str(full_path)))
             except Exception:
+                pass
+        else:
+            # Use os.walk with early dir pruning (fast, skips node_modules/.git early)
+            seen_dirs = set()  # prevent symlink loops
+            try:
+                for root, dirs, files in os.walk(base, followlinks=False):
+                    try:
+                        real_root = os.path.realpath(root)
+                        if real_root in seen_dirs:
+                            dirs[:] = []
+                            continue
+                        seen_dirs.add(real_root)
+                    except OSError:
+                        pass
+                    dirs[:] = [d for d in dirs if d not in self.SKIP_DIRS]
+                    for name in files:
+                        full = os.path.join(root, name)
+                        rel = os.path.relpath(full, base)
+                        if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(name, pattern):
+                            try:
+                                mtime = os.path.getmtime(full)
+                            except OSError:
+                                mtime = 0
+                            total_found += 1
+                            if len(heap) < self.MAX_RESULTS:
+                                heapq.heappush(heap, (mtime, full))
+                            elif mtime > heap[0][0]:
+                                heapq.heapreplace(heap, (mtime, full))
+            except PermissionError:
                 pass
 
         if not heap:
@@ -1696,11 +1700,19 @@ class GrepTool(Tool):
         results = []
         file_counts = {}
 
+        MAX_GREP_FILE_SIZE = 50 * 1024 * 1024  # 50MB — skip very large files
+
         def search_file(filepath):
             _, ext = os.path.splitext(filepath)
             if ext.lower() in self.BINARY_EXTS:
                 return
             if glob_filter and not fnmatch.fnmatch(os.path.basename(filepath), glob_filter):
+                return
+            # Skip very large files to avoid performance issues
+            try:
+                if os.path.getsize(filepath) > MAX_GREP_FILE_SIZE:
+                    return
+            except OSError:
                 return
             # Binary probe: check for null bytes in first 8KB (same pattern as ReadTool)
             try:
@@ -2069,7 +2081,7 @@ class NotebookEditTool(Tool):
         except (ValueError, TypeError):
             return "Error: cell_number must be a number"
         new_source = params.get("new_source", "")
-        cell_type = params.get("cell_type", "code")
+        cell_type = params.get("cell_type")  # None = preserve existing in replace mode
         edit_mode = params.get("edit_mode", "replace")
 
         if not nb_path:
@@ -2086,8 +2098,8 @@ class NotebookEditTool(Tool):
         # Block edits to protected config/permission files
         if _is_protected_path(nb_path):
             return f"Error: editing {os.path.basename(nb_path)} is blocked for security."
-        # H11: Validate cell_type
-        if cell_type not in self.VALID_CELL_TYPES:
+        # H11: Validate cell_type (None is allowed — means "preserve existing" in replace mode)
+        if cell_type is not None and cell_type not in self.VALID_CELL_TYPES:
             return f"Error: invalid cell_type '{cell_type}'. Must be: code, markdown, or raw"
         # C12: Reject negative cell_number for insert
         if cell_num < 0:
@@ -2096,21 +2108,29 @@ class NotebookEditTool(Tool):
         try:
             with open(nb_path, "r", encoding="utf-8") as f:
                 nb = json.load(f)
+        except json.JSONDecodeError as e:
+            return f"Error: notebook is not valid JSON: {e}"
         except Exception as e:
             return f"Error reading notebook: {e}"
 
-        cells = nb.get("cells", [])
-        # H12: Validate "cells" key exists
+        # Validate notebook structure
+        if not isinstance(nb, dict):
+            return "Error: notebook file is not a JSON object — may be corrupted"
         if "cells" not in nb:
             return "Error: notebook has no 'cells' key — may be corrupted"
+        cells = nb["cells"]
+        if not isinstance(cells, list):
+            return "Error: notebook 'cells' is not a list — may be corrupted"
 
         if edit_mode == "insert":
+            # For insert, cell_type defaults to "code" if not specified
+            ct = cell_type or "code"
             new_cell = {
-                "cell_type": cell_type,
+                "cell_type": ct,
                 "metadata": {},
                 "source": new_source.splitlines(True),
             }
-            if cell_type == "code":
+            if ct == "code":
                 new_cell["outputs"] = []
                 new_cell["execution_count"] = None
             cells.insert(cell_num, new_cell)
@@ -2122,13 +2142,15 @@ class NotebookEditTool(Tool):
             if cell_num >= len(cells):
                 return f"Error: cell {cell_num} out of range (0-{len(cells)-1})"
             old_type = cells[cell_num].get("cell_type", "code")
+            # Preserve existing cell_type when not explicitly specified
+            effective_type = cell_type if cell_type is not None else old_type
             cells[cell_num]["source"] = new_source.splitlines(True)
-            cells[cell_num]["cell_type"] = cell_type
+            cells[cell_num]["cell_type"] = effective_type
             # C11: Clean up fields when changing cell_type
-            if old_type == "code" and cell_type != "code":
+            if old_type == "code" and effective_type != "code":
                 cells[cell_num].pop("outputs", None)
                 cells[cell_num].pop("execution_count", None)
-            elif old_type != "code" and cell_type == "code":
+            elif old_type != "code" and effective_type == "code":
                 cells[cell_num].setdefault("outputs", [])
                 cells[cell_num].setdefault("execution_count", None)
 
