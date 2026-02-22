@@ -21,13 +21,15 @@
 
 **🇯🇵** オフラインのワークショップでAIエージェントを使って学習者をサポートしたり、有料プランに未加入の学生がエージェントコーディングを練習したり、ネットワークのない環境で自然言語を使ってターミナル操作を学んだり――そんな場面を想定した、非営利の研究・教育目的のユーティリティツールです。
 
+**🌱** やさしい にほんご：これは、むりょう（おかね いらない）で、AI（えーあい）に プログラムを かいて もらう ための どうぐ です。インターネットが なくても つかえます。がっこう や ワークショップで つかう ために つくりました。
+
 **🇺🇸** Built for offline workshops where instructors support learners with AI agents, for students without paid plans who want to practice agent coding, and for beginners learning terminal operations through natural language — a non-profit research and education utility.
 
 **🇨🇳** 面向离线工作坊中使用AI代理辅助学习者、未订阅付费计划的学生练习代理编程、以及初学者通过自然语言学习终端操作等场景，这是一个非营利性的研究与教育实用工具。
 
 ---
 
-## 🇯🇵 日本語 | [🇺🇸 English](#-english) | [🇨🇳 中文](#-中文)
+## 🇯🇵 日本語 | [🌱 やさしい日本語](#-やさしい-にほんご) | [🇺🇸 English](#-english) | [🇨🇳 中文](#-中文)
 
 ### これは何？
 
@@ -104,6 +106,64 @@ nano ~/.config/vibe-local/config
 ```
 
 </details>
+
+---
+
+## 🌱 やさしい にほんご
+
+### これは なに？
+
+Mac（まっく）で、AI（えーあい）が コードを かいて くれる どうぐ です。
+インターネットが なくても つかえます。おかねも かかりません。
+
+### いれかた（3つの ステップ）
+
+**1.** ターミナルを ひらく（`Cmd+Space` → 「ターミナル」で けんさく）
+
+**2.** したの もじを コピーして、はりつけて、Enterを おす：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ochyai/vibe-local/main/install.sh | bash
+```
+
+**3.** あたらしい ターミナルを ひらいて、これを うつ：
+
+```bash
+vibe-local
+```
+
+### つかいかた
+
+```bash
+# AIと はなしながら プログラムを つくる
+vibe-local
+
+# 1かいだけ しつもんする
+vibe-local -p "Pythonで じゃんけんゲームを つくって"
+```
+
+### きをつけること
+
+> **⚠️ だいじ：AIが あぶない コマンドを うつことが あります！**
+
+AIは かんぺきでは ありません。まちがった コマンドを うつことが あります。
+
+**ぜったいに やっては いけない こと：**
+
+| あぶない コマンド | なにが おきる |
+|---|---|
+| `rm -rf /` や `rm -rf ~` | パソコンの ファイルが ぜんぶ きえる |
+| `sudo` で はじまる コマンド | パソコンの だいじな せっていが かわる |
+| `chmod 777` | ファイルの セキュリティが なくなる |
+| `curl ... \| bash` | しらない プログラムが うごく |
+
+**あんぜんに つかう ほうほう：**
+
+- はじめて つかうときは、しつもんに **`n`** を おして ください（あんぜんモード）
+- AIが コマンドを うつまえに、「これを うっていい？」と きいてきます
+- わからない コマンドは **ぜったいに ゆるさないで ください**
+- だいじな ファイルが ある フォルダでは つかわないで ください
+- こまったら、`Ctrl+C` で とめられます
 
 ---
 
@@ -283,57 +343,126 @@ Ollama (local LLM runtime)
 qwen3-coder:30b (AI model)
 ```
 
-## 🚨 Security / リスクについて / 安全须知
+## 🚨 Security / セキュリティ / 安全须知
 
 ### 🇯🇵 日本語
 
-> **このツールは自己責任でご利用ください。**
+> **⚠️ このツールは自己責任でご利用ください。AIが実行するコマンドには注意が必要です。**
 
 `vibe-local` は初回起動時に **ツール自動許可モード** (`--dangerously-skip-permissions`) を使うか確認します。
 自動許可モードを選ぶと、AIがファイルの読み書き・コマンド実行・システム操作を **確認なしで** 実行します。
 
-- ローカルLLMはクラウドAI (Claude) より **精度が低い** ため、意図しない操作が実行される可能性があります
-- 重要なファイルがあるディレクトリでの使用は慎重に行ってください
-- 心配な場合は起動時に `n` を選択すると、毎回確認を求める通常モードで動きます
-- `-y` フラグで確認をスキップできますが、リスクを理解した上でご利用ください
+**ローカルLLMはクラウドAIより精度が低いため、意図しない危険な操作を実行するリスクがあります。**
+
+#### 絶対にやってはいけないこと
+
+AIが以下のようなコマンドを提案・実行しようとした場合は、**必ず拒否してください：**
+
+| 危険なコマンド | 何が起きるか |
+|---|---|
+| `rm -rf /` や `rm -rf ~/*` | ファイルが全削除される（復旧不可能） |
+| `sudo rm` / `sudo chmod` / `sudo chown` | システムファイルが破壊される |
+| `chmod 777` / `chmod -R 777` | セキュリティが無効化される |
+| `curl ... \| sudo bash` | 未知のスクリプトが管理者権限で実行される |
+| `dd if=... of=/dev/...` | ディスクが上書きされる |
+| `> /etc/...` や `> ~/.zshrc` | 設定ファイルが空になる |
+| `git push --force` | 他の人の作業が消える |
+
+#### 安全に使うためのルール
+
+1. **初回起動時は必ず `n`（通常モード）を選択する** — AIの各操作を事前に確認できます
+2. **わからないコマンドは許可しない** — 少しでも不安なら `n` で拒否
+3. **大事なファイルがあるフォルダでは使わない** — 新しい空フォルダで練習
+4. **`sudo` を求められたら基本的に拒否** — ローカルLLMの判断でシステム操作させない
+5. **困ったら `Ctrl+C` で停止**
 
 ```bash
-vibe-local        # 毎回パーミッション確認あり（初回に選択）
-vibe-local -y     # 確認スキップ（自動許可モード）
+vibe-local        # 通常モード（推奨）：毎回確認あり
+vibe-local -y     # 自動許可モード（上級者向け・自己責任）
 ```
+
+### 🌱 やさしい にほんご
+
+> **⚠️ だいじな おしらせ：AIは まちがえることが あります！**
+
+AIが うごかそうとする コマンド（めいれい）を よく みてください。
+わからない コマンドは、**ぜったいに `y`（はい）を おさないで ください。**
+
+- さいしょに きかれたら **`n`** を おす → AIが まいかい 「これ やっていい？」と きく
+- `rm`（さくじょ）や `sudo`（かんりしゃ）が はいった コマンドは きけん
+- こまったら **`Ctrl+C`**（コントロール と C を いっしょに おす）で とまる
+- れんしゅうは **あたらしい からの フォルダ** で やる
 
 ### 🇺🇸 English
 
-> **Use this tool at your own risk.**
+> **⚠️ Use this tool at your own risk. Pay attention to the commands the AI executes.**
 
 On first launch, `vibe-local` asks whether to enable **auto-approve mode** (`--dangerously-skip-permissions`).
 In auto-approve mode, the AI can read/write files, execute commands, and modify your system **without asking**.
 
-- Local LLMs are **less accurate** than cloud AI (Claude), so unintended actions may occur
-- Be careful when using in directories with important files
-- Choose `n` at the prompt to use normal mode (asks before each tool use)
-- The `-y` flag skips the prompt — only use it if you understand the risks
+**Local LLMs are less accurate than cloud AI — they may attempt dangerous operations unintentionally.**
+
+#### Commands you should NEVER allow
+
+If the AI suggests or tries to run any of these, **always reject:**
+
+| Dangerous command | What happens |
+|---|---|
+| `rm -rf /` or `rm -rf ~/*` | All files deleted (unrecoverable) |
+| `sudo rm` / `sudo chmod` / `sudo chown` | System files destroyed |
+| `chmod 777` / `chmod -R 777` | Security disabled on files |
+| `curl ... \| sudo bash` | Unknown script runs as admin |
+| `dd if=... of=/dev/...` | Disk overwritten |
+| `> /etc/...` or `> ~/.zshrc` | Config files emptied |
+| `git push --force` | Other people's work erased |
+
+#### Rules for safe usage
+
+1. **Always choose `n` (normal mode) on first launch** — you approve each action
+2. **Never allow commands you don't understand** — if unsure, reject
+3. **Don't use in folders with important files** — practice in a new empty folder
+4. **Reject `sudo` requests** — don't let a local LLM run system-level commands
+5. **Press `Ctrl+C` to stop at any time**
 
 ```bash
-vibe-local        # Permission check on first launch
-vibe-local -y     # Skip check (auto-approve mode)
+vibe-local        # Normal mode (recommended): confirms each action
+vibe-local -y     # Auto-approve mode (advanced users only, at your own risk)
 ```
 
 ### 🇨🇳 中文
 
-> **使用本工具风险自负。**
+> **⚠️ 使用本工具风险自负。请注意AI执行的每一个命令。**
 
 首次启动时，`vibe-local` 会询问是否启用 **工具自动批准模式** (`--dangerously-skip-permissions`)。
 在自动批准模式下，AI可以读写文件、执行命令、修改系统，**无需确认**。
 
-- 本地LLM的精度 **低于** 云端AI (Claude)，可能执行非预期操作
-- 在包含重要文件的目录中使用时请谨慎
-- 选择 `n` 将使用普通模式（每次工具使用前询问）
-- `-y` 参数跳过确认 - 请在理解风险后使用
+**本地LLM的精度低于云端AI，可能意外执行危险操作。**
+
+#### 绝对不能允许的命令
+
+如果AI建议或尝试运行以下命令，**务必拒绝：**
+
+| 危险命令 | 后果 |
+|---|---|
+| `rm -rf /` 或 `rm -rf ~/*` | 所有文件被删除（不可恢复） |
+| `sudo rm` / `sudo chmod` / `sudo chown` | 系统文件被破坏 |
+| `chmod 777` / `chmod -R 777` | 文件安全性被解除 |
+| `curl ... \| sudo bash` | 未知脚本以管理员权限运行 |
+| `dd if=... of=/dev/...` | 磁盘被覆盖 |
+| `> /etc/...` 或 `> ~/.zshrc` | 配置文件被清空 |
+| `git push --force` | 他人的工作被覆盖 |
+
+#### 安全使用规则
+
+1. **首次启动必须选择 `n`（普通模式）** — 每次操作前确认
+2. **不理解的命令一律拒绝** — 有疑问就按 `n`
+3. **不要在有重要文件的文件夹中使用** — 在新的空文件夹中练习
+4. **拒绝 `sudo` 请求** — 不要让本地LLM执行系统级命令
+5. **随时按 `Ctrl+C` 停止**
 
 ```bash
-vibe-local        # 首次启动时确认权限
-vibe-local -y     # 跳过确认（自动批准模式）
+vibe-local        # 普通模式（推荐）：每次操作前确认
+vibe-local -y     # 自动批准模式（仅限高级用户，风险自负）
 ```
 
 ---
@@ -347,6 +476,13 @@ vibe-local -y     # 跳过确认（自动批准模式）
 ---
 
 ## 📜 Disclaimer / 免責事項 / 免责声明
+
+### 🌱 やさしい にほんご
+
+> **この どうぐは Anthropic（あんそろぴっく）という かいしゃとは かんけい ありません。**
+> じぶんの せきにんで つかってください。
+> なにか もんだいが おきても、つくった ひとは せきにんを とれません。
+> **つかうまえに、せんせいや くわしいひとに そうだん してください。**
 
 ### 🇯🇵
 
