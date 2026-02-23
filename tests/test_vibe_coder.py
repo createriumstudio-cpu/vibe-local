@@ -159,27 +159,139 @@ class TestConfig:
         finally:
             os.unlink(f.name)
 
-    def test_auto_detect_model_high_ram(self):
+    def test_auto_detect_model_high_ram_fallback(self):
+        """When Ollama is not reachable, falls back to RAM-based heuristic."""
         cfg = vc.Config()
         cfg.model = ""
         original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
         try:
             vc._get_ram_gb = lambda: 64
+            vc.Config._query_installed_models = lambda self: []
             cfg._auto_detect_model()
         finally:
             vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
         assert cfg.model == "qwen3-coder:30b"
 
-    def test_auto_detect_model_low_ram(self):
+    def test_auto_detect_model_low_ram_fallback(self):
+        """When Ollama is not reachable, falls back to RAM-based heuristic."""
         cfg = vc.Config()
         cfg.model = ""
         original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
         try:
             vc._get_ram_gb = lambda: 4
+            vc.Config._query_installed_models = lambda self: []
             cfg._auto_detect_model()
         finally:
             vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
         assert cfg.model == "qwen3:1.7b"
+
+    def test_auto_detect_smart_picks_best_installed(self):
+        """Smart detection picks best installed model that fits in RAM.
+        On 512GB, 671B models are skipped (need 768GB+), picks qwen3:235b instead."""
+        cfg = vc.Config()
+        cfg.model = ""
+        original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
+        try:
+            vc._get_ram_gb = lambda: 512
+            vc.Config._query_installed_models = lambda self: [
+                "qwen3:8b", "qwen3-coder:30b", "llama3.3:70b",
+                "deepseek-r1:671b", "qwen3:235b"
+            ]
+            cfg._auto_detect_model()
+        finally:
+            vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
+        # 671B needs 768GB+ (too slow for interactive), picks 235b (Tier A, 256GB+)
+        assert cfg.model == "qwen3:235b"
+
+    def test_auto_detect_671b_on_1tb(self):
+        """671B model IS auto-selected on 1TB+ server."""
+        cfg = vc.Config()
+        cfg.model = ""
+        original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
+        try:
+            vc._get_ram_gb = lambda: 1024
+            vc.Config._query_installed_models = lambda self: [
+                "qwen3:8b", "deepseek-r1:671b"
+            ]
+            cfg._auto_detect_model()
+        finally:
+            vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
+        assert cfg.model == "deepseek-r1:671b"
+
+    def test_auto_detect_smart_respects_ram_limit(self):
+        """Smart detection skips models that exceed RAM."""
+        cfg = vc.Config()
+        cfg.model = ""
+        original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
+        try:
+            vc._get_ram_gb = lambda: 32
+            vc.Config._query_installed_models = lambda self: [
+                "qwen3:8b", "qwen3-coder:30b", "llama3.3:70b", "deepseek-r1:671b"
+            ]
+            cfg._auto_detect_model()
+        finally:
+            vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
+        # 32GB: 671B(768), 70B(96), 30b(24) → picks qwen3-coder:30b
+        assert cfg.model == "qwen3-coder:30b"
+
+    def test_auto_detect_picks_sidecar(self):
+        """Smart detection picks a sidecar model different from main."""
+        cfg = vc.Config()
+        cfg.model = ""
+        cfg.sidecar_model = ""
+        original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
+        try:
+            vc._get_ram_gb = lambda: 512
+            vc.Config._query_installed_models = lambda self: [
+                "qwen3:8b", "qwen3:235b"
+            ]
+            cfg._auto_detect_model()
+        finally:
+            vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
+        assert cfg.model == "qwen3:235b"
+        assert cfg.sidecar_model == "qwen3:8b"
+
+    def test_auto_detect_671b_skipped_on_512gb(self):
+        """671B models are NOT auto-selected on 512GB (too slow for interactive use)."""
+        cfg = vc.Config()
+        cfg.model = ""
+        original = vc._get_ram_gb
+        orig_query = vc.Config._query_installed_models
+        try:
+            vc._get_ram_gb = lambda: 512
+            vc.Config._query_installed_models = lambda self: [
+                "qwen3:8b", "deepseek-r1:671b", "llama3.3:70b"
+            ]
+            cfg._auto_detect_model()
+        finally:
+            vc._get_ram_gb = original
+            vc.Config._query_installed_models = orig_query
+        # 512GB: 671B skipped (768), 405B not installed, 235B not installed,
+        # 70B needs 96 → fits!
+        assert cfg.model == "llama3.3:70b"
+        assert cfg.model != "deepseek-r1:671b"
+
+    def test_get_model_tier(self):
+        """get_model_tier returns correct tier info."""
+        tier, ram = vc.Config.get_model_tier("deepseek-r1:671b")
+        assert tier == "S"
+        assert ram == 768
+        tier, ram = vc.Config.get_model_tier("qwen3-coder:30b")
+        assert tier == "C"
+        tier, ram = vc.Config.get_model_tier("unknown-model:99b")
+        assert tier is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4747,7 +4859,7 @@ class TestTokenUsageDisplay:
 
     def test_version_bump(self):
         """Verify version was bumped for this feature release."""
-        assert vc.__version__ == "0.9.1"
+        assert vc.__version__ == "0.9.3"
 
     def test_bash_tool_has_run_in_background_param(self):
         tool = vc.BashTool()
@@ -5727,15 +5839,15 @@ class TestRound10AuditFixes:
 class TestWebToolsAuditFixes:
     """Tests for web tools audit fixes (Chrome UA, DDG class matching, timeout)."""
 
-    def test_chrome_ua_updated(self):
-        """Chrome UA string should be v133+, not v120."""
+    def test_honest_user_agent(self):
+        """UA should identify as vibe-local (no Chrome spoofing)."""
         import inspect
         fetch_source = inspect.getsource(vc.WebFetchTool.execute)
-        assert "Chrome/120" not in fetch_source, "WebFetch UA should be updated from Chrome/120"
-        assert "Chrome/133" in fetch_source, "WebFetch UA should use Chrome/133"
+        assert "Chrome/" not in fetch_source, "WebFetch UA should not spoof Chrome"
+        assert "vibe-local" in fetch_source, "WebFetch UA should identify as vibe-local"
         search_source = inspect.getsource(vc.WebSearchTool._ddg_search)
-        assert "Chrome/120" not in search_source, "WebSearch UA should be updated from Chrome/120"
-        assert "Chrome/133" in search_source, "WebSearch UA should use Chrome/133"
+        assert "Chrome/" not in search_source, "WebSearch UA should not spoof Chrome"
+        assert "vibe-local" in search_source, "WebSearch UA should identify as vibe-local"
 
     def test_ddg_class_regex_flexible(self):
         """DDG result__a regex should match multi-class attributes."""

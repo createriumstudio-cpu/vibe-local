@@ -602,6 +602,45 @@ TEMPERATURE=0.7
 CONTEXT_WINDOW=32768
 ```
 
+### Model Tiers / モデルティア / 模型层级
+
+**🇯🇵** v0.9.3以降、vibe-localはOllamaにインストール済みのモデルを自動検出し、RAMに収まる最良のモデルを選択します。`/models` で一覧とティア情報を表示できます。
+
+**🇺🇸** Since v0.9.3, vibe-local auto-detects installed Ollama models and picks the best one that fits in your RAM. Use `/models` to see the list with tier info.
+
+**🇨🇳** v0.9.3起，vibe-local自动检测已安装的Ollama模型，选择适合RAM的最佳模型。使用 `/models` 查看列表和层级信息。
+
+| Tier | RAM (practical) | Models | Quality | Speed |
+|------|-----------------|--------|---------|-------|
+| **S** Frontier | 768GB+ | `deepseek-r1:671b`, `deepseek-v3:671b` | Best reasoning | Slow (server-grade) |
+| **A** Expert | 256GB+ | `qwen3:235b`, `deepseek-coder-v2:236b`, `llama3.1:405b` | Excellent | Moderate |
+| **B** Advanced | 96GB+ | `llama3.3:70b`, `mixtral:8x22b`, `command-r-plus` | Very strong | Good |
+| **C** Solid | 16GB+ | `qwen3-coder:30b`, `qwen2.5-coder:32b` | Good balance | Fast |
+| **D** Light | 8GB+ | `qwen3:8b`, `llama3.1:8b` | Decent | Very fast |
+| **E** Minimal | 4GB+ | `qwen3:1.7b`, `llama3.2:3b` | Basic | Instant |
+
+> **🇯🇵** RAM欄は「快適に使える最低RAM」です。モデルファイルサイズの1.5〜2倍が目安（KVキャッシュ+OS分）。671Bモデルは512GBマシンでも遅いため、手動指定(`MODEL=`)でのみ利用を推奨します。
+>
+> **🇺🇸** RAM column shows practical minimum for interactive use (model + KV cache + OS). Rule of thumb: 1.5-2x model file size. 671B models are too slow on 512GB machines for interactive coding — use `MODEL=` to force if needed.
+
+**🇯🇵 推奨設定例 / 🇺🇸 Recommended setups:**
+```bash
+# Mac Studio M3 Ultra 512GB → Tier A auto-selected
+ollama pull qwen3:235b          # Tier A: 高品質 + 実用的な速度
+ollama pull qwen3:8b            # Sidecar: コンテキスト圧縮用
+# config は不要 — 自動でqwen3:235bが選択されます
+
+# 128GB RAM マシン → Tier B auto-selected
+ollama pull llama3.3:70b        # Tier B: 高品質 + 快適な速度
+ollama pull qwen3:8b            # Sidecar
+
+# 671Bモデルを使いたい場合（速度を犠牲にして最高品質）:
+# ~/.config/vibe-local/config
+MODEL="deepseek-r1:671b"       # 手動指定のみ — 自動選択されません
+SIDECAR_MODEL="qwen3:8b"
+CONTEXT_WINDOW=65536
+```
+
 ### Environment Variables / 環境変数 / 环境变量
 
 **🇯🇵** 環境変数は設定ファイルより優先されます。CLIフラグは環境変数より優先されます。
