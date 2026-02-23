@@ -7936,6 +7936,63 @@ class TestParallelAgentsOutputFormat:
         assert "[FAIL]" in content or "FAIL" in content
 
 
+class TestAutoParallelDetection:
+    """Tests for Agent._detect_parallel_tasks() auto-detection."""
+
+    def test_numbered_list_newline(self):
+        """Newline-separated numbered list should detect parallel tasks."""
+        result = vc.Agent._detect_parallel_tasks(
+            "1. ファイル一覧を出して\n2. git statusを見せて\n3. ディスク使用量を調べて"
+        )
+        assert len(result) == 3
+
+    def test_numbered_list_single_line(self):
+        """Double-space-separated numbered list should detect parallel tasks."""
+        result = vc.Agent._detect_parallel_tasks(
+            "1. READMEの行数を調べて  2. テスト数を数えて  3. クラス一覧を出して"
+        )
+        assert len(result) == 3
+        assert "READMEの行数を調べて" in result[0]
+
+    def test_comma_separated_tasks(self):
+        """Japanese comma-separated investigation tasks should be detected."""
+        result = vc.Agent._detect_parallel_tasks(
+            "TODOを探して、テスト数を数えて"
+        )
+        assert len(result) == 2
+
+    def test_three_comma_tasks(self):
+        """Three comma-separated tasks should be detected."""
+        result = vc.Agent._detect_parallel_tasks(
+            "READMEの行数を調べて、テスト数を数えて、クラス一覧を出して"
+        )
+        assert len(result) == 3
+
+    def test_to_conjunction(self):
+        """Japanese と conjunction should split tasks."""
+        result = vc.Agent._detect_parallel_tasks(
+            "ファイル数を数えてとテスト結果を確認して"
+        )
+        assert len(result) == 2
+
+    def test_short_input_ignored(self):
+        """Short inputs should not be detected as parallel."""
+        result = vc.Agent._detect_parallel_tasks("hello.pyを作って")
+        assert len(result) == 0
+
+    def test_question_ignored(self):
+        """Questions should not be detected as parallel."""
+        result = vc.Agent._detect_parallel_tasks("これは何ですか？もっと教えてください？")
+        assert len(result) == 0
+
+    def test_single_task_not_split(self):
+        """Single task with no conjunction should not split."""
+        result = vc.Agent._detect_parallel_tasks(
+            "READMEファイルの内容を読んで要約してください"
+        )
+        assert len(result) == 0
+
+
 class TestOneShotBannerSuppression:
     """Tests for banner suppression in one-shot (-p) mode."""
 

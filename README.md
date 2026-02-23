@@ -37,10 +37,10 @@ MacやWindows、LinuxにコマンドをコピペするだけでAIがコードを
 **エージェントのコア `vibe-coder.py` は Python 標準ライブラリだけで書かれた単一ファイルです。** pip install 不要、外部パッケージ依存ゼロ。ソースコードはそのまま読めるため、AIコーディングエージェントの仕組みを学ぶ教材としても、研究のベースラインとしても使えます。すべてがオープンソース (MIT) で公開されています。
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6500行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6600行) → Ollama (直接通信)
 ```
 
-ログイン不要・Node.js不要・プロキシプロセス不要。16個の内蔵ツール、サブエージェント、並列エージェント、ファイル監視、画像・PDF読み取り対応。MCP連携・スキルシステム・Plan/Actモード・Gitチェックポイント・自動テスト搭載。652テスト。
+ログイン不要・Node.js不要・プロキシプロセス不要。16個の内蔵ツール、サブエージェント、並列エージェント、ファイル監視、画像・PDF読み取り対応。MCP連携・スキルシステム・Plan/Actモード・Gitチェックポイント・自動テスト搭載。680テスト。
 
 ### インストール (3ステップ)
 
@@ -81,7 +81,7 @@ vibe-local --model qwen3:8b
 
 | 環境 | メモリ | メインモデル | サイドカー | 備考 |
 |------|--------|-------------|-----------|------|
-| Apple Silicon Mac (M1以降) | 96GB+ | gpt-oss:120b | qwen3:8b | **最速推奨** ~70tok/s |
+| Apple Silicon Mac (M1以降) | 96GB+ | gpt-oss:120b | qwen3-coder:30b | **最速推奨** ~70tok/s |
 | Apple Silicon Mac (M1以降) | 32GB+ | qwen3-coder:30b | qwen3:8b | 推奨 |
 | Apple Silicon Mac (M1以降) | 16GB | qwen3:8b | qwen3:1.7b | 十分実用的 |
 | Apple Silicon Mac (M1以降) | 8GB | qwen3:1.7b | なし | 最低限動作 |
@@ -226,10 +226,10 @@ No network required. Completely free. **Python + Ollama only** — a fully open-
 **The core agent `vibe-coder.py` is a single file written entirely with the Python standard library.** No pip install needed. Zero external dependencies. The source code is human-readable as-is, making it ideal as teaching material for understanding how AI coding agents work, or as a research baseline. Everything is open source (MIT).
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6500 lines) → Ollama (direct)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6600 lines) → Ollama (direct)
 ```
 
-No login. No Node.js. No proxy process. 16 built-in tools, sub-agents, parallel agents, file watcher, image/PDF reading. MCP integration, Skills system, Plan/Act mode, Git checkpoints, auto-test loop. 652 tests.
+No login. No Node.js. No proxy process. 16 built-in tools, sub-agents, parallel agents, file watcher, image/PDF reading. MCP integration, Skills system, Plan/Act mode, Git checkpoints, auto-test loop. 680 tests.
 
 ### Install (3 steps)
 
@@ -270,7 +270,7 @@ vibe-local --model qwen3:8b
 
 | Environment | RAM | Main Model | Sidecar | Notes |
 |-------------|-----|------------|---------|-------|
-| Apple Silicon Mac (M1+) | 96GB+ | gpt-oss:120b | qwen3:8b | **Fastest** ~70tok/s |
+| Apple Silicon Mac (M1+) | 96GB+ | gpt-oss:120b | qwen3-coder:30b | **Fastest** ~70tok/s |
 | Apple Silicon Mac (M1+) | 32GB+ | qwen3-coder:30b | qwen3:8b | Recommended |
 | Apple Silicon Mac (M1+) | 16GB | qwen3:8b | qwen3:1.7b | Very capable |
 | Apple Silicon Mac (M1+) | 8GB | qwen3:1.7b | none | Minimum viable |
@@ -329,7 +329,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 **核心代理 `vibe-coder.py` 是仅使用 Python 标准库编写的单一文件。** 无需 pip install，零外部依赖。源代码直接可读，非常适合作为学习AI编程代理工作原理的教材或研究基线。一切以开源 (MIT) 形式公开。
 
 ```
-vibe-local → vibe-coder.py (开源, 纯Python标准库, ~6500行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (开源, 纯Python标准库, ~6600行) → Ollama (直接通信)
 ```
 
 无需登录、无需Node.js、无需代理进程。16个内置工具、子代理、并行代理、文件监视、图像/PDF读取支持。MCP集成、技能系统、Plan/Act模式、Git检查点、自动测试循环。652项测试。
@@ -373,7 +373,7 @@ vibe-local --model qwen3:8b
 
 | 环境 | 内存 | 主模型 | 边车模型 | 备注 |
 |------|------|--------|---------|------|
-| Apple Silicon Mac (M1及以上) | 96GB+ | gpt-oss:120b | qwen3:8b | **最快** ~70tok/s |
+| Apple Silicon Mac (M1及以上) | 96GB+ | gpt-oss:120b | qwen3-coder:30b | **最快** ~70tok/s |
 | Apple Silicon Mac (M1及以上) | 32GB+ | qwen3-coder:30b | qwen3:8b | 推荐 |
 | Apple Silicon Mac (M1及以上) | 16GB | qwen3:8b | qwen3:1.7b | 足够实用 |
 | Apple Silicon Mac (M1及以上) | 8GB | qwen3:1.7b | 无 | 最低限运行 |
@@ -434,7 +434,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
                          │
                          ▼
 ┌────────────────────────────────────────────────────────────┐
-│  vibe-coder.py  (single file, Python stdlib only, ~6500L)  │
+│  vibe-coder.py  (single file, Python stdlib only, ~6600L)  │
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Agent Loop (parallel tool execution)                │  │
