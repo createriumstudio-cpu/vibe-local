@@ -37,10 +37,10 @@ MacやWindows、LinuxにコマンドをコピペするだけでAIがコードを
 **エージェントのコア `vibe-coder.py` は Python 標準ライブラリだけで書かれた単一ファイルです。** pip install 不要、外部パッケージ依存ゼロ。ソースコードはそのまま読めるため、AIコーディングエージェントの仕組みを学ぶ教材としても、研究のベースラインとしても使えます。すべてがオープンソース (MIT) で公開されています。
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~5200行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6200行) → Ollama (直接通信)
 ```
 
-ログイン不要・Node.js不要・プロキシプロセス不要。15個の内蔵ツール、サブエージェント、画像・PDF読み取り対応。577テスト。
+ログイン不要・Node.js不要・プロキシプロセス不要。15個の内蔵ツール、サブエージェント、画像・PDF読み取り対応。MCP連携・スキルシステム・Plan/Actモード・Gitチェックポイント・自動テスト搭載。628テスト。
 
 ### インストール (3ステップ)
 
@@ -181,6 +181,11 @@ vibe-local -p "Pythonで じゃんけんゲームを つくって"
 | `/status` | いまの じょうほうを みる |
 | `/save` | セッションを ほぞんする |
 | `/compact` | かいわを みじかくする（メモリ せつやく） |
+| `/plan` | よみとり モード（しらべるだけ） |
+| `/approve` | じっこう モード（プランを じっこう する） |
+| `/checkpoint` | いまの じょうたいを ほぞんする |
+| `/rollback` | ほぞんした じょうたいに もどす |
+| `/autotest` | じどう テスト ON/OFF |
 | `/yes` | じどう きょか モード オン |
 | `"""` | ながい ぶんしょうを にゅうりょく する |
 | `Ctrl+C` | とめる / おわる |
@@ -219,10 +224,10 @@ No network required. Completely free. **Python + Ollama only** — a fully open-
 **The core agent `vibe-coder.py` is a single file written entirely with the Python standard library.** No pip install needed. Zero external dependencies. The source code is human-readable as-is, making it ideal as teaching material for understanding how AI coding agents work, or as a research baseline. Everything is open source (MIT).
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~5200 lines) → Ollama (direct)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6200 lines) → Ollama (direct)
 ```
 
-No login. No Node.js. No proxy process. 15 built-in tools, sub-agents, image/PDF reading. 577 tests.
+No login. No Node.js. No proxy process. 15 built-in tools, sub-agents, image/PDF reading. MCP integration, Skills system, Plan/Act mode, Git checkpoints, auto-test loop. 628 tests.
 
 ### Install (3 steps)
 
@@ -321,10 +326,10 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 **核心代理 `vibe-coder.py` 是仅使用 Python 标准库编写的单一文件。** 无需 pip install，零外部依赖。源代码直接可读，非常适合作为学习AI编程代理工作原理的教材或研究基线。一切以开源 (MIT) 形式公开。
 
 ```
-vibe-local → vibe-coder.py (开源, 纯Python标准库, ~5200行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (开源, 纯Python标准库, ~6200行) → Ollama (直接通信)
 ```
 
-无需登录、无需Node.js、无需代理进程。15个内置工具、子代理、图像/PDF读取支持。577项测试。
+无需登录、无需Node.js、无需代理进程。15个内置工具、子代理、图像/PDF读取支持。MCP集成、技能系统、Plan/Act模式、Git检查点、自动测试循环。628项测试。
 
 ### 安装（3步）
 
@@ -425,18 +430,25 @@ VIBE_LOCAL_DEBUG=1 vibe-local
                          │
                          ▼
 ┌────────────────────────────────────────────────────────────┐
-│  vibe-coder.py  (single file, Python stdlib only, ~5200L)  │
+│  vibe-coder.py  (single file, Python stdlib only, ~6200L)  │
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Agent Loop (parallel tool execution)                │  │
 │  │  User input → LLM → Tool calls → Execute →          │  │
 │  │  Add results → Loop until done                       │  │
 │  ├──────────────────────────────────────────────────────┤  │
-│  │  15 Built-in Tools                                   │  │
+│  │  15 Built-in Tools + MCP Tools                       │  │
 │  │  Bash (+ background), Read (+ images/PDF/ipynb),     │  │
 │  │  Write, Edit (+ rich diff), Glob, Grep,              │  │
 │  │  WebFetch, WebSearch, NotebookEdit, SubAgent,        │  │
 │  │  TaskCreate/List/Get/Update, AskUserQuestion         │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │  v1.0 Extensions                                    │  │
+│  │  MCP Client (JSON-RPC 2.0, stdio, tool discovery)   │  │
+│  │  Skills System (.md files → system prompt injection) │  │
+│  │  Plan/Act Mode (read-only → execution transition)    │  │
+│  │  Git Checkpoint (stash-based rollback)               │  │
+│  │  Auto Test Loop (lint + test after edits)            │  │
 │  ├──────────────────────────────────────────────────────┤  │
 │  │  System Prompt + OS-Specific Hints                   │  │
 │  │  macOS: brew, /Users/, system_profiler               │  │
@@ -475,7 +487,7 @@ There are many excellent open-source projects in the AI coding agent space. Each
 | API key required | Yes (or local) | Yes (or local) | Yes (or local) | Yes (OpenAI) | Yes (Google) | Yes (or local) | **No** |
 | Install | `pip install` | `go install` / brew | VS Code marketplace | `npm install` | `npm install` | Binary / installer | `curl \| bash` |
 | Interface | Terminal | Terminal (rich TUI) | VS Code | Terminal | Terminal | Terminal + Desktop | Terminal |
-| Strength | Git-aware, multi-model | Beautiful TUI, speed | Deep IDE integration | OpenAI ecosystem | Google ecosystem | Extensible, MCP | Simplicity, education |
+| Strength | Git-aware, multi-model | Beautiful TUI, speed | Deep IDE integration | OpenAI ecosystem | Google ecosystem | Extensible, MCP | Simplicity, education, MCP |
 | License | Apache 2.0 | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | Apache 2.0 | MIT |
 
 > **aider** is one of the most mature CLI tools, with excellent git integration and multi-model support. **opencode** stands out with its beautiful Bubble Tea TUI and fast Go implementation. **Cline** provides deep VS Code integration that feels native. **Codex CLI** and **Gemini CLI** bring the power of OpenAI and Google ecosystems respectively. **Goose** (by Block) offers an extensible MCP-based agent framework. These are all excellent tools built by talented teams — if you're a professional developer, you should try them.
@@ -537,8 +549,12 @@ There are many excellent open-source projects in the AI coding agent space. Each
 | `/commit` | Git stage + commit | gitコミット | git提交 |
 | `/diff` | Show git diff | git diff表示 | 显示git diff |
 | `/git <cmd>` | Run git subcommand | gitサブコマンド | 运行git子命令 |
-| `/plan` | Plan mode (read-only) | プランモード | 计划模式 |
-| `/execute` | Exit plan mode | プランモード終了 | 退出计划模式 |
+| `/plan` | Plan mode (read-only analysis) | プランモード（読み取り専用） | 计划模式（只读分析） |
+| `/approve`, `/act` | Switch to act mode (execute plan) | Actモード切替（実行） | 切换到执行模式 |
+| `/checkpoint` | Save git checkpoint | Gitチェックポイント保存 | 保存Git检查点 |
+| `/rollback` | Rollback to last checkpoint | チェックポイントに戻す | 回滚到上一个检查点 |
+| `/autotest` | Toggle auto lint+test after edits | 自動テストON/OFF | 自动测试开关 |
+| `/skills` | List loaded skills | スキル一覧 | 列出已加载技能 |
 | `/init` | Create CLAUDE.md | CLAUDE.md作成 | 创建CLAUDE.md |
 | `/yes` | Enable auto-approve | 自動許可ON | 启用自动批准 |
 | `exit`, `quit`, `bye` | Exit (no `/` needed) | 終了 | 退出 |
@@ -589,6 +605,40 @@ vibe-local auto-detects installed Ollama models and picks the best one for your 
 
 > RAM column shows practical minimum for interactive use (model + KV cache + OS). 671B models are not auto-selected on 512GB machines — use `MODEL=` to force.
 
+### MCP (Model Context Protocol)
+
+vibe-coder supports MCP servers for extending tool capabilities. Configure in `~/.config/vibe-local/mcp.json` or `.vibe-local/mcp.json` (project-level):
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "python3",
+      "args": ["/path/to/mcp_server.py"],
+      "env": {"API_KEY": "..."}
+    }
+  }
+}
+```
+
+MCP tools are auto-discovered at startup and registered as `mcp_{server}_{tool}`. Compatible with the same format as Claude Code's MCP configuration.
+
+MCPサーバーを設定すると、起動時に自動検出されツールとして登録されます。Claude CodeのMCP設定と同じ形式です。
+
+### Skills
+
+Place `.md` files in any of these directories to inject custom instructions into the system prompt:
+
+```
+~/.config/vibe-local/skills/   # Global skills
+.vibe-local/skills/            # Project-level skills
+skills/                        # Project-level (alternative)
+```
+
+Use `/skills` to list loaded skills. Max 50KB per skill file. Symlinks are ignored for security.
+
+`.md` ファイルを配置するとシステムプロンプトに自動注入されます。`/skills` で一覧表示。
+
 ### Environment Variables
 
 Priority: CLI flags > Environment variables > Config file > Defaults
@@ -601,6 +651,65 @@ Priority: CLI flags > Environment variables > Config file > Defaults
 | `VIBE_CODER_SIDECAR` | Override sidecar model |
 | `VIBE_LOCAL_SIDECAR_MODEL` | Sidecar model (set by launcher) |
 | `VIBE_CODER_DEBUG` / `VIBE_LOCAL_DEBUG` | Set to `1` for debug logging |
+
+---
+
+## v1.0 Features / v1.0 新機能
+
+### Plan/Act Mode / プラン・アクトモード
+
+Separate analysis from execution for safer, more deliberate coding:
+
+```
+/plan       → Phase 1: Read-only exploration (Glob, Grep, Read only)
+/approve    → Phase 2: Full execution (all tools re-enabled)
+/rollback   → Undo all changes since plan started
+```
+
+Plan→Act切替時にgitチェックポイントが自動作成されます。
+
+### Git Checkpoint & Rollback / Gitチェックポイント
+
+Automatic safety net using git stash:
+
+- **Auto-checkpoint**: Created before every Write/Edit and on Plan→Act transition
+- `/checkpoint` — Manual checkpoint
+- `/rollback` — Restore to last checkpoint
+
+### Auto Test Loop / 自動テストループ
+
+Automatically run lint and tests after file edits:
+
+```
+/autotest   → Toggle ON/OFF
+```
+
+- Auto-detects: pytest, npm test
+- Python files: syntax check via `py_compile`
+- Test failures are fed back to the LLM for self-repair
+
+編集後に自動でlint+テストを実行。エラーはLLMにフィードバックして自動修正。
+
+### MCP Integration / MCP連携
+
+Connect to [Model Context Protocol](https://modelcontextprotocol.io/) servers:
+
+- JSON-RPC 2.0 over stdio
+- Auto-discovery of tools at startup
+- Compatible with Claude Code's `mcpServers` config format
+- Project-level config: `.vibe-local/mcp.json`
+
+See [Configuration > MCP](#mcp-model-context-protocol) for setup.
+
+### Skills System / スキルシステム
+
+Load custom `.md` instruction files into the system prompt:
+
+- Global: `~/.config/vibe-local/skills/*.md`
+- Project: `.vibe-local/skills/*.md`
+- `/skills` to list loaded skills
+
+カスタム指示を `.md` ファイルからシステムプロンプトに注入。
 
 ---
 
@@ -682,6 +791,11 @@ vibe-local -p "Write Hello World in Python"
 | Terminal commands | Yes | |
 | Git (local) | Yes | push/pull need network |
 | HTML app creation | Yes | Opens in browser |
+| Plan/Act mode | Yes | |
+| Git checkpoint & rollback | Yes | |
+| Auto test loop | Yes | |
+| MCP servers (local) | Yes | Depends on MCP server |
+| Skills system | Yes | |
 | Web search | Online only | DuckDuckGo |
 | URL fetch | Online only | |
 | Package install | Online only | pip/brew/winget |
@@ -693,6 +807,7 @@ vibe-local -p "Write Hello World in Python"
 **What this tool does:**
 - Runs `vibe-coder.py`, a fully open-source Python coding agent
 - Communicates directly with Ollama (open-source LLM runtime) running locally
+- Optionally connects to MCP servers (local processes, user-configured)
 - No communication with external servers (Web search/fetch are optional)
 - Does not use any Anthropic software
 
