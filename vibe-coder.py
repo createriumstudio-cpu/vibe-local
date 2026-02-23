@@ -4733,6 +4733,13 @@ class TUI:
             _tc = _tier_colors.get(_tier, "250")
             _tier_str = " %s[Tier %s]%s" % (_ansi(chr(27) + "[38;5;%sm" % _tc), _tier, C.RESET)
         print(f"  {model_icon} {info_dim}Model{C.RESET}  {model_color}{C.BOLD}{config.model}{C.RESET}{_tier_str}")
+        if config.sidecar_model:
+            _sc_tier, _ = Config.get_model_tier(config.sidecar_model)
+            _sc_tier_str = ""
+            if _sc_tier:
+                _sc_tc = _tier_colors.get(_sc_tier, "250")
+                _sc_tier_str = " %s[Tier %s]%s" % (_ansi(chr(27) + "[38;5;%sm" % _sc_tc), _sc_tier, C.RESET)
+            print(f"  🔄 {info_dim}Sidecar{C.RESET} {info_bright}{config.sidecar_model}{C.RESET}{_sc_tier_str}")
         print(f"  🔒 {info_dim}Mode{C.RESET}   {mode_str}")
         print(f"  🦙 {info_dim}Engine{C.RESET} {info_bright}Ollama{C.RESET} {C.DIM}({config.ollama_host}){C.RESET}")
         print(f"  💾 {info_dim}RAM{C.RESET}    {info_bright}{ram}GB{C.RESET} {C.DIM}(ctx: {config.context_window} tokens){C.RESET}")
