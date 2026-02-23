@@ -4859,7 +4859,7 @@ class TestTokenUsageDisplay:
 
     def test_version_bump(self):
         """Verify version was bumped for this feature release."""
-        assert vc.__version__ == "0.9.5"
+        assert vc.__version__ == "1.0.0"
 
     def test_bash_tool_has_run_in_background_param(self):
         tool = vc.BashTool()
@@ -6917,3 +6917,556 @@ class TestMediumFixes:
             content = f.read()
         # For new files, realpath should be applied
         assert "resolved = os.path.realpath(file_path)" in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NEW FEATURES (v1.0.0): MCP, Skills, Plan/Act, Git Checkpoint, Auto Test
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestMCPClient:
+    """Tests for the MCPClient class."""
+
+    def test_mcp_client_init(self):
+        """MCPClient stores config correctly."""
+        mcp = vc.MCPClient("test-server", "echo", args=["hello"], env={"FOO": "bar"})
+        assert mcp.name == "test-server"
+        assert mcp.command == "echo"
+        assert mcp.args == ["hello"]
+        assert mcp.env == {"FOO": "bar"}
+        assert mcp._proc is None
+        assert mcp._request_id == 0
+
+    def test_mcp_client_default_args(self):
+        """MCPClient default args and env."""
+        mcp = vc.MCPClient("s", "cmd")
+        assert mcp.args == []
+        assert mcp.env == {}
+
+    def test_mcp_send_without_start_raises(self):
+        """_send should raise if server not started."""
+        mcp = vc.MCPClient("test", "echo")
+        with pytest.raises(RuntimeError, match="not running"):
+            mcp._send("test/method")
+
+    def test_mcp_stop_no_proc(self):
+        """stop() should not crash if no process."""
+        mcp = vc.MCPClient("test", "echo")
+        mcp.stop()  # should not raise
+
+    def test_mcp_stop_dead_proc(self):
+        """stop() should handle already-dead process."""
+        mcp = vc.MCPClient("test", "echo")
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = 0  # already dead
+        mcp._proc = mock_proc
+        mcp.stop()
+        mock_proc.stdin.close.assert_not_called()
+
+    def test_mcp_client_start_not_found(self):
+        """start() with nonexistent command should raise."""
+        mcp = vc.MCPClient("test", "/nonexistent/binary/xyz_12345")
+        with pytest.raises(RuntimeError, match="failed to start"):
+            mcp.start()
+
+    def test_mcp_client_send_format(self):
+        """_send should format JSON-RPC 2.0 correctly."""
+        mcp = vc.MCPClient("test", "cat")
+        # Mock a process with stdin/stdout
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None  # still running
+        response = {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+        mock_proc.stdout.readline.return_value = (json.dumps(response) + "\n").encode("utf-8")
+        mcp._proc = mock_proc
+        result = mcp._send("test/method", {"key": "value"})
+        assert result == {"ok": True}
+        # Check what was written to stdin
+        written = mock_proc.stdin.write.call_args[0][0]
+        parsed = json.loads(written.decode("utf-8"))
+        assert parsed["jsonrpc"] == "2.0"
+        assert parsed["method"] == "test/method"
+        assert parsed["params"] == {"key": "value"}
+        assert "id" in parsed
+
+    def test_mcp_client_send_error_response(self):
+        """_send should raise on MCP error response."""
+        mcp = vc.MCPClient("test", "cat")
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        response = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid Request"}}
+        mock_proc.stdout.readline.return_value = (json.dumps(response) + "\n").encode("utf-8")
+        mcp._proc = mock_proc
+        with pytest.raises(RuntimeError, match="MCP error"):
+            mcp._send("bad/method")
+
+    def test_mcp_call_tool_extracts_text(self):
+        """call_tool should extract text content from MCP response."""
+        mcp = vc.MCPClient("test", "cat")
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        response = {
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"content": [{"type": "text", "text": "hello world"}]}
+        }
+        mock_proc.stdout.readline.return_value = (json.dumps(response) + "\n").encode("utf-8")
+        mcp._proc = mock_proc
+        result = mcp.call_tool("greet", {"name": "test"})
+        assert result == "hello world"
+
+    def test_mcp_list_tools(self):
+        """list_tools should populate _tools dict."""
+        mcp = vc.MCPClient("test", "cat")
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        response = {
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"tools": [
+                {"name": "tool_a", "description": "Tool A"},
+                {"name": "tool_b", "description": "Tool B"},
+            ]}
+        }
+        mock_proc.stdout.readline.return_value = (json.dumps(response) + "\n").encode("utf-8")
+        mcp._proc = mock_proc
+        tools = mcp.list_tools()
+        assert len(tools) == 2
+        assert "tool_a" in mcp._tools
+        assert "tool_b" in mcp._tools
+
+
+class TestMCPTool:
+    """Tests for the MCPTool wrapper class."""
+
+    def test_mcp_tool_name_format(self):
+        """MCPTool name should be mcp_{server}_{tool}."""
+        mcp = vc.MCPClient("myserver", "cmd")
+        schema = {"name": "do_thing", "description": "Does a thing", "inputSchema": {"type": "object", "properties": {}}}
+        tool = vc.MCPTool(mcp, schema)
+        assert tool.name == "mcp_myserver_do_thing"
+        assert tool._mcp_tool_name == "do_thing"
+
+    def test_mcp_tool_schema_conversion(self):
+        """get_schema should return OpenAI-compatible format."""
+        mcp = vc.MCPClient("srv", "cmd")
+        schema = {
+            "name": "search",
+            "description": "Search for items",
+            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+        }
+        tool = vc.MCPTool(mcp, schema)
+        oai_schema = tool.get_schema()
+        assert oai_schema["type"] == "function"
+        assert oai_schema["function"]["name"] == "mcp_srv_search"
+        assert oai_schema["function"]["description"] == "Search for items"
+        assert "query" in oai_schema["function"]["parameters"]["properties"]
+
+    def test_mcp_tool_execute_error(self):
+        """execute should return error string on failure."""
+        mcp = vc.MCPClient("srv", "cmd")
+        schema = {"name": "fail_tool", "description": "Will fail"}
+        tool = vc.MCPTool(mcp, schema)
+        # _send will fail because no process
+        result = tool.execute({"key": "val"})
+        assert "MCP tool error" in result
+
+
+class TestLoadMCPServers:
+    """Tests for _load_mcp_servers function."""
+
+    def test_load_from_config_dir(self, tmp_path):
+        """Load MCP servers from config directory."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        mcp_json = config_dir / "mcp.json"
+        mcp_json.write_text(json.dumps({
+            "mcpServers": {
+                "test-srv": {"command": "echo", "args": ["hello"]}
+            }
+        }))
+        cfg = vc.Config()
+        cfg.config_dir = str(config_dir)
+        cfg.cwd = str(tmp_path)
+        servers = vc._load_mcp_servers(cfg)
+        assert "test-srv" in servers
+        assert servers["test-srv"]["command"] == "echo"
+
+    def test_load_from_project_dir(self, tmp_path):
+        """Load MCP servers from project .vibe-local/mcp.json."""
+        proj_dir = tmp_path / ".vibe-local"
+        proj_dir.mkdir()
+        (proj_dir / "mcp.json").write_text(json.dumps({
+            "mcpServers": {
+                "proj-srv": {"command": "python3", "args": ["-m", "srv"]}
+            }
+        }))
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "nonexistent")
+        cfg.cwd = str(tmp_path)
+        servers = vc._load_mcp_servers(cfg)
+        assert "proj-srv" in servers
+
+    def test_load_empty_config(self, tmp_path):
+        """Empty mcp.json returns no servers."""
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "nonexistent")
+        cfg.cwd = str(tmp_path)
+        servers = vc._load_mcp_servers(cfg)
+        assert servers == {}
+
+    def test_load_invalid_json(self, tmp_path):
+        """Invalid JSON doesn't crash."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "mcp.json").write_text("not json {{{")
+        cfg = vc.Config()
+        cfg.config_dir = str(config_dir)
+        cfg.cwd = str(tmp_path)
+        servers = vc._load_mcp_servers(cfg)
+        assert servers == {}
+
+    def test_load_symlink_ignored(self, tmp_path):
+        """Symlinked mcp.json should be ignored for security."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        real_file = tmp_path / "real_mcp.json"
+        real_file.write_text(json.dumps({"mcpServers": {"evil": {"command": "rm"}}}))
+        link = config_dir / "mcp.json"
+        link.symlink_to(real_file)
+        cfg = vc.Config()
+        cfg.config_dir = str(config_dir)
+        cfg.cwd = str(tmp_path)
+        servers = vc._load_mcp_servers(cfg)
+        assert servers == {}
+
+
+class TestLoadSkills:
+    """Tests for _load_skills function."""
+
+    def test_load_skills_from_config_dir(self, tmp_path):
+        """Load .md skill files from config skills dir."""
+        skills_dir = tmp_path / "config" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "coding.md").write_text("# Coding Skill\nWrite good code.")
+        (skills_dir / "review.md").write_text("# Review Skill\nReview carefully.")
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "config")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert "coding" in skills
+        assert "review" in skills
+        assert "# Coding Skill" in skills["coding"]
+
+    def test_load_skills_from_project_dir(self, tmp_path):
+        """Load skills from .vibe-local/skills/."""
+        proj_skills = tmp_path / ".vibe-local" / "skills"
+        proj_skills.mkdir(parents=True)
+        (proj_skills / "local-skill.md").write_text("Local skill content")
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "nonexistent")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert "local-skill" in skills
+
+    def test_load_skills_no_dir(self, tmp_path):
+        """No skills directory returns empty dict."""
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "nonexistent")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert skills == {}
+
+    def test_load_skills_ignores_non_md(self, tmp_path):
+        """Non-.md files should be ignored."""
+        skills_dir = tmp_path / "config" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "readme.txt").write_text("Not a skill")
+        (skills_dir / "script.py").write_text("import os")
+        (skills_dir / "actual.md").write_text("Real skill")
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "config")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert len(skills) == 1
+        assert "actual" in skills
+
+    def test_load_skills_ignores_large_files(self, tmp_path):
+        """Files over 50KB should be skipped."""
+        skills_dir = tmp_path / "config" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "small.md").write_text("Small skill")
+        (skills_dir / "huge.md").write_text("x" * 60000)  # 60KB
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "config")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert "small" in skills
+        assert "huge" not in skills
+
+    def test_load_skills_ignores_symlinks(self, tmp_path):
+        """Symlinked .md files should be ignored for security."""
+        skills_dir = tmp_path / "config" / "skills"
+        skills_dir.mkdir(parents=True)
+        real_file = tmp_path / "real.md"
+        real_file.write_text("evil skill")
+        (skills_dir / "evil.md").symlink_to(real_file)
+        (skills_dir / "normal.md").write_text("safe skill")
+        cfg = vc.Config()
+        cfg.config_dir = str(tmp_path / "config")
+        cfg.cwd = str(tmp_path)
+        skills = vc._load_skills(cfg)
+        assert "evil" not in skills
+        assert "normal" in skills
+
+
+class TestGitCheckpoint:
+    """Tests for the GitCheckpoint class."""
+
+    def test_not_git_repo(self, tmp_path):
+        """GitCheckpoint in non-git dir should report not git."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        assert gc._is_git_repo is False
+
+    def test_create_not_git(self, tmp_path):
+        """create() should return False in non-git dir."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        assert gc.create("test") is False
+
+    def test_rollback_not_git(self, tmp_path):
+        """rollback() should fail in non-git dir."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        ok, msg = gc.rollback()
+        assert ok is False
+        assert "Not a git repository" in msg
+
+    def test_rollback_no_checkpoints(self, tmp_path):
+        """rollback() with no checkpoints should fail gracefully."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        gc._is_git_repo = True  # pretend
+        ok, msg = gc.rollback()
+        assert ok is False
+        assert "No checkpoints" in msg
+
+    def test_list_checkpoints_not_git(self, tmp_path):
+        """list_checkpoints() in non-git dir returns empty."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        assert gc.list_checkpoints() == []
+
+    def test_git_checkpoint_in_real_repo(self, tmp_path):
+        """Full create/list/rollback cycle in a real git repo."""
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=str(repo), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(repo), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo), capture_output=True)
+        # Create initial commit
+        (repo / "file.txt").write_text("initial")
+        subprocess.run(["git", "add", "."], cwd=str(repo), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo), capture_output=True)
+
+        gc = vc.GitCheckpoint(str(repo))
+        assert gc._is_git_repo is True
+
+        # No changes → create returns False
+        assert gc.create("empty") is False
+
+        # Make a change
+        (repo / "file.txt").write_text("modified")
+        assert gc.create("test-checkpoint") is True
+        assert len(gc._checkpoints) == 1
+
+        # File should be back to initial (stash push reverts)
+        assert (repo / "file.txt").read_text() == "initial"
+
+        # List should include our checkpoint
+        cps = gc.list_checkpoints()
+        assert any("vibe-checkpoint" in cp for cp in cps)
+
+        # Rollback
+        ok, msg = gc.rollback()
+        assert ok is True
+        assert "test-checkpoint" in msg
+        assert (repo / "file.txt").read_text() == "modified"
+
+    def test_max_checkpoints_limit(self, tmp_path):
+        """Checkpoint list should not exceed MAX_CHECKPOINTS."""
+        gc = vc.GitCheckpoint(str(tmp_path))
+        gc._is_git_repo = True
+        # Simulate many checkpoints
+        for i in range(25):
+            gc._checkpoints.append((i, f"cp-{i}", time.time()))
+        assert len(gc._checkpoints) == 25
+        # After create (which would fail but test the limit logic)
+        gc._checkpoints = gc._checkpoints[-gc.MAX_CHECKPOINTS:]
+        assert len(gc._checkpoints) == 20
+
+
+class TestAutoTestRunner:
+    """Tests for the AutoTestRunner class."""
+
+    def test_auto_detect_pytest(self, tmp_path):
+        """Should detect pytest from pyproject.toml."""
+        (tmp_path / "pyproject.toml").write_text("[tool.pytest]\n")
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert runner.test_cmd is not None
+        assert "pytest" in runner.test_cmd
+
+    def test_auto_detect_tests_dir(self, tmp_path):
+        """Should detect pytest from tests/ directory."""
+        (tmp_path / "tests").mkdir()
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert runner.test_cmd is not None
+        assert "pytest" in runner.test_cmd
+
+    def test_auto_detect_npm(self, tmp_path):
+        """Should detect npm test from package.json."""
+        (tmp_path / "package.json").write_text('{"name": "test"}')
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert runner.test_cmd is not None
+        assert "npm" in runner.test_cmd
+
+    def test_auto_detect_nothing(self, tmp_path):
+        """No test markers → no test_cmd."""
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert runner.test_cmd is None
+
+    def test_disabled_by_default(self, tmp_path):
+        """Auto test should be disabled by default."""
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert runner.enabled is False
+
+    def test_run_after_edit_disabled(self, tmp_path):
+        """run_after_edit returns None when disabled."""
+        runner = vc.AutoTestRunner(str(tmp_path))
+        result = runner.run_after_edit("test.py")
+        assert result is None
+
+    def test_run_after_edit_syntax_check(self, tmp_path):
+        """When enabled, should run syntax check on .py files."""
+        runner = vc.AutoTestRunner(str(tmp_path))
+        runner.enabled = True
+        runner.test_cmd = None  # no test suite
+
+        # Good file
+        good_file = tmp_path / "good.py"
+        good_file.write_text("x = 1\n")
+        result = runner.run_after_edit(str(good_file))
+        # Should pass (no syntax error)
+        assert result is None or result == []
+
+    def test_run_after_edit_syntax_error(self, tmp_path):
+        """Should catch syntax errors in .py files."""
+        runner = vc.AutoTestRunner(str(tmp_path))
+        runner.enabled = True
+        runner.test_cmd = None  # no test suite
+
+        # Bad file
+        bad_file = tmp_path / "bad.py"
+        bad_file.write_text("def x(\n")
+        result = runner.run_after_edit(str(bad_file))
+        # Should return error
+        assert result is not None
+        if isinstance(result, list):
+            assert len(result) > 0
+
+    def test_pytest_priority_over_npm(self, tmp_path):
+        """pytest should take priority when both exist."""
+        (tmp_path / "pyproject.toml").write_text("[tool.pytest]\n")
+        (tmp_path / "package.json").write_text('{"name": "test"}')
+        runner = vc.AutoTestRunner(str(tmp_path))
+        assert "pytest" in runner.test_cmd
+
+
+class TestPlanActMode:
+    """Tests for Plan/Act mode functionality."""
+
+    def test_plan_mode_code_exists(self):
+        """Plan mode implementation should exist in source."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "_plan_mode" in content
+        assert "ACT_ONLY_TOOLS" in content
+        assert "Phase 1: Analysis" in content
+        assert "Phase 2: Execution" in content
+
+    def test_act_only_tools_defined(self):
+        """ACT_ONLY_TOOLS should contain write/edit/bash tools."""
+        tools = vc.Agent.ACT_ONLY_TOOLS
+        assert "Bash" in tools
+        assert "Write" in tools
+        assert "Edit" in tools
+        assert "NotebookEdit" in tools
+        # Read-only tools should NOT be in the set
+        assert "Read" not in tools
+        assert "Glob" not in tools
+        assert "Grep" not in tools
+
+    def test_slash_commands_registered(self):
+        """New slash commands should be in tab-completion and did-you-mean lists."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        # Tab-completion list
+        assert '"/approve"' in content
+        assert '"/act"' in content
+        assert '"/checkpoint"' in content
+        assert '"/rollback"' in content
+        assert '"/autotest"' in content
+        assert '"/skills"' in content
+
+    def test_help_includes_new_commands(self):
+        """Help text should mention new commands."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "/approve" in content
+        assert "/checkpoint" in content
+        assert "/rollback" in content
+        assert "/autotest" in content
+        assert "/skills" in content
+
+    def test_mcp_cleanup_on_exit(self):
+        """MCP clients should be cleaned up on exit."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "mcp.stop()" in content
+        assert "for mcp in _mcp_clients" in content
+
+
+class TestNewFeatureIntegration:
+    """Integration tests verifying new features are wired up in Agent/main."""
+
+    def test_agent_has_git_checkpoint(self):
+        """Agent should have git_checkpoint attribute."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "self.git_checkpoint = GitCheckpoint" in content
+
+    def test_agent_has_auto_test(self):
+        """Agent should have auto_test attribute."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "self.auto_test = AutoTestRunner" in content
+
+    def test_checkpoint_before_write_edit(self):
+        """Git checkpoint should be created before Write/Edit."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert 'before-write' in content or 'before-{tool_name.lower()}' in content
+
+    def test_autotest_after_write_edit(self):
+        """Auto-test should run after Write/Edit."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "auto_test.run_after_edit" in content
+
+    def test_skills_injected_into_system_prompt(self):
+        """Skills should be injected into system prompt in main()."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "_load_skills" in content
+
+    def test_mcp_servers_initialized_in_main(self):
+        """MCP servers should be initialized in main()."""
+        with open(os.path.join(VIBE_LOCAL_DIR, "vibe-coder.py")) as f:
+            content = f.read()
+        assert "_load_mcp_servers" in content
+        assert "MCPClient" in content
+        assert "mcp.initialize()" in content

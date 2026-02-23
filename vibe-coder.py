@@ -55,7 +55,7 @@ _bg_task_counter = [0]
 _bg_tasks_lock = threading.Lock()
 MAX_BG_TASKS = 50  # Prevent unbounded memory growth
 
-__version__ = "0.9.5"
+__version__ = "1.0.0"
 
 # ════════════════════════════════════════════════════════════════════════════════
 # ANSI Colors
@@ -3150,6 +3150,362 @@ class SubAgentTool(Tool):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# MCP Client — Model Context Protocol (stdio JSON-RPC 2.0)
+# ════════════════════════════════════════════════════════════════════════════════
+
+class MCPClient:
+    """Communicates with an MCP server over stdin/stdout using JSON-RPC 2.0."""
+
+    def __init__(self, name, command, args=None, env=None):
+        self.name = name
+        self.command = command
+        self.args = args or []
+        self.env = env or {}
+        self._proc = None
+        self._request_id = 0
+        self._tools = {}  # name -> schema
+
+    def start(self):
+        """Start the MCP server subprocess."""
+        full_env = os.environ.copy()
+        full_env.update(self.env)
+        try:
+            self._proc = subprocess.Popen(
+                [self.command] + self.args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=full_env,
+                start_new_session=True,
+            )
+        except (FileNotFoundError, PermissionError) as e:
+            raise RuntimeError(f"MCP server '{self.name}' failed to start: {e}")
+
+    def stop(self):
+        """Stop the MCP server subprocess."""
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.stdin.close()
+                self._proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+
+    def _send(self, method, params=None):
+        """Send a JSON-RPC 2.0 request and return the result."""
+        if not self._proc or self._proc.poll() is not None:
+            raise RuntimeError(f"MCP server '{self.name}' is not running")
+        self._request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": method,
+        }
+        if params is not None:
+            request["params"] = params
+        data = json.dumps(request) + "\n"
+        try:
+            self._proc.stdin.write(data.encode("utf-8"))
+            self._proc.stdin.flush()
+            line = self._proc.stdout.readline()
+            if not line:
+                raise RuntimeError(f"MCP server '{self.name}' closed unexpectedly")
+            response = json.loads(line.decode("utf-8"))
+            if "error" in response:
+                err = response["error"]
+                raise RuntimeError(f"MCP error ({err.get('code', '?')}): {err.get('message', '?')}")
+            return response.get("result", {})
+        except (BrokenPipeError, OSError) as e:
+            raise RuntimeError(f"MCP server '{self.name}' communication failed: {e}")
+
+    def initialize(self):
+        """Initialize the MCP connection and discover tools."""
+        result = self._send("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "vibe-coder", "version": __version__}
+        })
+        # Send initialized notification (no response expected)
+        notif = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
+        try:
+            self._proc.stdin.write(notif.encode("utf-8"))
+            self._proc.stdin.flush()
+        except Exception:
+            pass
+        return result
+
+    def list_tools(self):
+        """Discover available tools from the MCP server."""
+        result = self._send("tools/list")
+        tools = result.get("tools", [])
+        self._tools = {t["name"]: t for t in tools}
+        return tools
+
+    def call_tool(self, name, arguments):
+        """Call a tool on the MCP server."""
+        result = self._send("tools/call", {"name": name, "arguments": arguments})
+        # Extract text content from MCP response
+        content = result.get("content", [])
+        texts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                texts.append(item.get("text", ""))
+            elif isinstance(item, str):
+                texts.append(item)
+        return "\n".join(texts) if texts else json.dumps(result)
+
+
+class MCPTool(Tool):
+    """Wraps an MCP server tool as a vibe-coder tool."""
+
+    def __init__(self, mcp_client, mcp_tool_schema):
+        self._mcp = mcp_client
+        self._schema = mcp_tool_schema
+        self.name = f"mcp_{mcp_client.name}_{mcp_tool_schema['name']}"
+        self._mcp_tool_name = mcp_tool_schema["name"]
+
+    def get_schema(self):
+        """Convert MCP tool schema to OpenAI function calling format."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self._schema.get("description", f"MCP tool: {self._mcp_tool_name}"),
+                "parameters": self._schema.get("inputSchema", {"type": "object", "properties": {}}),
+            }
+        }
+
+    def execute(self, params):
+        try:
+            return self._mcp.call_tool(self._mcp_tool_name, params)
+        except RuntimeError as e:
+            return f"MCP tool error: {e}"
+
+
+def _load_mcp_servers(config):
+    """Load MCP server configurations from config directory and CLAUDE.md."""
+    servers = {}
+    # Check for mcp.json in config dir
+    mcp_config = os.path.join(config.config_dir, "mcp.json")
+    if os.path.isfile(mcp_config) and not os.path.islink(mcp_config):
+        try:
+            with open(mcp_config, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "mcpServers" in data:
+                for name, srv in data["mcpServers"].items():
+                    if isinstance(srv, dict) and "command" in srv:
+                        servers[name] = srv
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"{C.YELLOW}Warning: Could not load mcp.json: {e}{C.RESET}", file=sys.stderr)
+    # Also check project-level .vibe-local/mcp.json
+    proj_mcp = os.path.join(config.cwd, ".vibe-local", "mcp.json")
+    if os.path.isfile(proj_mcp) and not os.path.islink(proj_mcp):
+        try:
+            with open(proj_mcp, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "mcpServers" in data:
+                for name, srv in data["mcpServers"].items():
+                    if isinstance(srv, dict) and "command" in srv:
+                        servers[name] = srv
+        except (OSError, json.JSONDecodeError):
+            pass
+    return servers
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Skills — SKILL.md loading (compatible with Gemini CLI format)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _load_skills(config):
+    """Load SKILL.md files from standard locations."""
+    skills = {}  # name -> content
+    skill_dirs = [
+        os.path.join(config.config_dir, "skills"),
+        os.path.join(config.cwd, ".vibe-local", "skills"),
+        os.path.join(config.cwd, "skills"),
+    ]
+    for skill_dir in skill_dirs:
+        if not os.path.isdir(skill_dir):
+            continue
+        try:
+            for entry in os.listdir(skill_dir):
+                if not entry.endswith(".md"):
+                    continue
+                fpath = os.path.join(skill_dir, entry)
+                if os.path.islink(fpath) or not os.path.isfile(fpath):
+                    continue
+                try:
+                    fsize = os.path.getsize(fpath)
+                    if fsize > 50000:  # 50KB max per skill
+                        continue
+                    with open(fpath, encoding="utf-8") as f:
+                        content = f.read(50000)
+                    name = entry[:-3]  # remove .md
+                    skills[name] = content
+                except (OSError, UnicodeDecodeError):
+                    pass
+        except OSError:
+            pass
+    return skills
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Git Checkpoint & Rollback
+# ════════════════════════════════════════════════════════════════════════════════
+
+class GitCheckpoint:
+    """Manages git-based checkpoints for safe rollback."""
+
+    MAX_CHECKPOINTS = 20
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        self._checkpoints = []  # list of (stash_ref, label, timestamp)
+        self._is_git_repo = self._check_git()
+
+    def _check_git(self):
+        """Check if cwd is inside a git repo."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=self.cwd, capture_output=True, timeout=5
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def _run_git(self, args, timeout=10):
+        """Run a git command and return (success, stdout)."""
+        try:
+            result = subprocess.run(
+                ["git"] + args,
+                cwd=self.cwd, capture_output=True, text=True, timeout=timeout
+            )
+            return result.returncode == 0, result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False, ""
+
+    def create(self, label="auto"):
+        """Create a checkpoint (git stash). Returns True if created."""
+        if not self._is_git_repo:
+            return False
+        # Check if there are changes to stash
+        ok, status = self._run_git(["status", "--porcelain"])
+        if not ok or not status.strip():
+            return False  # nothing to checkpoint
+        # Include untracked files in stash
+        ok, ref = self._run_git(["stash", "push", "-u", "-m", f"vibe-checkpoint: {label}"])
+        if ok:
+            self._checkpoints.append((len(self._checkpoints), label, time.time()))
+            if len(self._checkpoints) > self.MAX_CHECKPOINTS:
+                self._checkpoints = self._checkpoints[-self.MAX_CHECKPOINTS:]
+            return True
+        return False
+
+    def rollback(self):
+        """Rollback to the last checkpoint. Returns (success, message)."""
+        if not self._is_git_repo:
+            return False, "Not a git repository"
+        if not self._checkpoints:
+            return False, "No checkpoints available"
+        # Pop the most recent stash
+        ok, output = self._run_git(["stash", "pop"])
+        if ok:
+            cp = self._checkpoints.pop()
+            return True, f"Rolled back to checkpoint: {cp[1]}"
+        return False, f"Rollback failed: {output}"
+
+    def list_checkpoints(self):
+        """List available checkpoints."""
+        if not self._is_git_repo:
+            return []
+        ok, output = self._run_git(["stash", "list"])
+        if ok and output:
+            return [line for line in output.split("\n") if "vibe-checkpoint" in line]
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Auto Test/Lint Loop
+# ════════════════════════════════════════════════════════════════════════════════
+
+class AutoTestRunner:
+    """Runs configured test/lint commands after file modifications."""
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        self.enabled = False
+        self.test_cmd = None  # e.g., "python3 -m pytest -x --tb=short"
+        self.lint_cmd = None  # e.g., "python3 -m py_compile"
+        self._auto_detect()
+
+    def _auto_detect(self):
+        """Auto-detect test/lint commands from project files."""
+        # Detect pytest
+        for marker in ["pytest.ini", "setup.cfg", "pyproject.toml"]:
+            if os.path.isfile(os.path.join(self.cwd, marker)):
+                self.test_cmd = "python3 -m pytest -x --tb=short -q"
+                break
+        # Detect tests/ directory
+        if not self.test_cmd and os.path.isdir(os.path.join(self.cwd, "tests")):
+            self.test_cmd = "python3 -m pytest -x --tb=short -q"
+        # Detect package.json (npm test)
+        if os.path.isfile(os.path.join(self.cwd, "package.json")):
+            if not self.test_cmd:
+                self.test_cmd = "npm test"
+
+    def run_after_edit(self, file_path):
+        """Run tests/lint after a file was modified. Returns error output or None."""
+        if not self.enabled:
+            return None
+
+        results = []
+
+        # Run lint on the specific file (Python only)
+        if file_path.endswith(".py") and self.lint_cmd:
+            try:
+                result = subprocess.run(
+                    self.lint_cmd.split() + [file_path],
+                    cwd=self.cwd, capture_output=True, text=True, timeout=30
+                )
+                if result.returncode != 0:
+                    results.append(f"Lint error:\n{result.stderr or result.stdout}")
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+        elif file_path.endswith(".py"):
+            # Default: py_compile check
+            try:
+                result = subprocess.run(
+                    ["python3", "-m", "py_compile", file_path],
+                    cwd=self.cwd, capture_output=True, text=True, timeout=15
+                )
+                if result.returncode != 0:
+                    results.append(f"Syntax error:\n{result.stderr}")
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+
+        # Run test suite
+        if self.test_cmd:
+            try:
+                result = subprocess.run(
+                    self.test_cmd.split(),
+                    cwd=self.cwd, capture_output=True, text=True, timeout=120
+                )
+                if result.returncode != 0:
+                    output = (result.stdout + "\n" + result.stderr).strip()
+                    # Truncate long test output
+                    if len(output) > 3000:
+                        output = output[:3000] + "\n...(truncated)"
+                    results.append(f"Test failure:\n{output}")
+            except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                results.append(f"Test runner error: {e}")
+
+        return "\n\n".join(results) if results else None
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Tool Registry
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -3965,8 +4321,9 @@ class TUI:
                 _slash_commands = [
                     "/help", "/exit", "/quit", "/q", "/clear", "/model", "/models",
                     "/status", "/save", "/compact", "/yes", "/no", "/tokens",
-                    "/commit", "/diff", "/git", "/plan", "/undo", "/init",
-                    "/config", "/debug",
+                    "/commit", "/diff", "/git", "/plan", "/approve", "/act",
+                    "/execute", "/undo", "/init", "/config", "/debug",
+                    "/checkpoint", "/rollback", "/autotest", "/skills",
                 ]
                 def _completer(text, state):
                     if text.startswith("/"):
@@ -4546,9 +4903,14 @@ class TUI:
   {_c198}/commit{C.RESET}            Generate AI commit message
   {_c198}/diff{C.RESET}              Show git diff
   {_c198}/git{C.RESET} <args>        Run git commands
-  {_c51}━━ Plan Mode {sep[12:]}{C.RESET}
-  {_c198}/plan{C.RESET}              Enter plan mode
-  {_c198}/execute{C.RESET}           Execute plan
+  {_c51}━━ Plan/Act Mode {sep[16:]}{C.RESET}
+  {_c198}/plan{C.RESET}              Enter plan mode (read-only)
+  {_c198}/approve{C.RESET}, {_c198}/act{C.RESET}     Switch to act mode (execute plan)
+  {_c198}/checkpoint{C.RESET}        Save git checkpoint
+  {_c198}/rollback{C.RESET}          Rollback to last checkpoint
+  {_c51}━━ Extensions {sep[13:]}{C.RESET}
+  {_c198}/autotest{C.RESET}          Toggle auto lint+test after edits
+  {_c198}/skills{C.RESET}            List loaded skills
   {_c51}━━ Keyboard {sep[11:]}{C.RESET}
   {_c198}Ctrl+C{C.RESET}             Stop current task
   {_c198}Ctrl+C x2{C.RESET}          Exit (within 1.5s)
@@ -4614,6 +4976,9 @@ class Agent:
         "SubAgent",
     }
 
+    # Tools allowed in act mode only (write/modify tools)
+    ACT_ONLY_TOOLS = {"Bash", "Write", "Edit", "NotebookEdit"}
+
     def __init__(self, config, client, registry, permissions, session, tui):
         self.config = config
         self.client = client
@@ -4624,6 +4989,8 @@ class Agent:
         self._interrupted = threading.Event()
         self._tui_lock = threading.Lock()
         self._plan_mode = False
+        self.git_checkpoint = GitCheckpoint(config.cwd)
+        self.auto_test = AutoTestRunner(config.cwd)
 
     def run(self, user_input):
         """Run the agent loop for a single user request."""
@@ -4850,6 +5217,10 @@ class Agent:
                         if self._interrupted.is_set():
                             break
                         try:
+                            # Git checkpoint before write/edit operations
+                            if tool_name in ("Write", "Edit") and self.git_checkpoint._is_git_repo:
+                                self.git_checkpoint.create(f"before-{tool_name.lower()}")
+
                             is_long_op = tool_name in ("Bash", "WebFetch", "WebSearch")
                             if is_long_op:
                                 self.tui.start_spinner(f"Running {tool_name}")
@@ -4858,6 +5229,22 @@ class Agent:
                                 self.tui.stop_spinner()
                             self.tui.show_tool_result(tool_name, output)
                             results.append(ToolResult(tc_id, output))
+
+                            # Auto test after Write/Edit
+                            if tool_name in ("Write", "Edit") and self.auto_test.enabled:
+                                fpath = tool_params.get("file_path", "")
+                                if fpath:
+                                    test_errors = self.auto_test.run_after_edit(fpath)
+                                    if test_errors:
+                                        print(f"\n  {_ansi(chr(27)+'[38;5;196m')}Auto-test errors detected:{C.RESET}")
+                                        for line in test_errors.split('\n')[:5]:
+                                            print(f"  {C.DIM}{line}{C.RESET}")
+                                        # Feed errors back as additional context
+                                        results.append(ToolResult(
+                                            f"autotest_{tc_id}",
+                                            f"[AUTO-TEST] Errors detected after {tool_name}:\n{test_errors}\n\nPlease fix these errors.",
+                                            True
+                                        ))
                         except KeyboardInterrupt:
                             self.tui.stop_spinner()
                             results.append(ToolResult(tc_id, "Interrupted by user", True))
@@ -5076,11 +5463,49 @@ def main():
 
     # Setup components
     system_prompt = _build_system_prompt(config)
+
+    # Load skills and inject into system prompt
+    skills = _load_skills(config)
+    if skills:
+        system_prompt += "\n# Loaded Skills\n"
+        for skill_name, skill_content in skills.items():
+            # Truncate each skill to 2000 chars to avoid bloating context
+            truncated = skill_content[:2000] + "..." if len(skill_content) > 2000 else skill_content
+            system_prompt += f"\n## Skill: {skill_name}\n{truncated}\n"
+        if config.debug:
+            print(f"{C.DIM}[debug] Loaded {len(skills)} skills: {', '.join(skills.keys())}{C.RESET}", file=sys.stderr)
+
     session = Session(config, system_prompt)
     session.set_client(client)  # enable sidecar model for context compaction
     registry = ToolRegistry().register_defaults()
     permissions = PermissionMgr(config)
     registry.register(SubAgentTool(config, client, registry, permissions))
+
+    # Initialize MCP servers
+    _mcp_clients = []
+    mcp_server_configs = _load_mcp_servers(config)
+    for srv_name, srv_config in mcp_server_configs.items():
+        try:
+            mcp = MCPClient(
+                name=srv_name,
+                command=srv_config["command"],
+                args=srv_config.get("args", []),
+                env=srv_config.get("env", {}),
+            )
+            mcp.start()
+            mcp.initialize()
+            tools = mcp.list_tools()
+            for tool_schema in tools:
+                mcp_tool = MCPTool(mcp, tool_schema)
+                registry.register(mcp_tool)
+                # MCP tools need permission checks
+                permissions.ASK_TOOLS.add(mcp_tool.name)
+            _mcp_clients.append(mcp)
+            if config.debug:
+                print(f"{C.DIM}[debug] MCP '{srv_name}': {len(tools)} tools registered{C.RESET}", file=sys.stderr)
+        except Exception as e:
+            print(f"{C.YELLOW}Warning: MCP server '{srv_name}' failed: {e}{C.RESET}", file=sys.stderr)
+
     agent = Agent(config, client, registry, permissions, session, tui)
 
     # Handle Ctrl+C gracefully
@@ -5512,20 +5937,77 @@ def main():
                 # ── Plan mode commands ────────────────────────────────
                 elif cmd == "/plan":
                     agent._plan_mode = True
-                    print(f"\n  {_ansi(chr(27)+'[38;5;226m')}━━ Plan Mode ━━━━━━━━━━━━━━━━━━━━━━{C.RESET}")
-                    print(f"  {_ansi(chr(27)+'[38;5;226m')}Read-only exploration enabled.{C.RESET}")
-                    print(f"  {_ansi(chr(27)+'[38;5;240m')}Tools: Read, Glob, Grep, WebFetch, WebSearch, Task*{C.RESET}")
-                    print(f"  {_ansi(chr(27)+'[38;5;240m')}No file modifications allowed.{C.RESET}")
-                    print(f"  {_ansi(chr(27)+'[38;5;240m')}Use /execute to exit plan mode.{C.RESET}")
-                    print(f"  {_ansi(chr(27)+'[38;5;226m')}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
+                    _c226 = _ansi(chr(27)+'[38;5;226m')
+                    _c240 = _ansi(chr(27)+'[38;5;240m')
+                    print(f"\n  {_c226}━━ Plan Mode (Phase 1: Analysis) ━━{C.RESET}")
+                    print(f"  {_c226}Read-only exploration enabled.{C.RESET}")
+                    print(f"  {_c240}Allowed: Read, Glob, Grep, WebFetch, WebSearch, Task*, SubAgent{C.RESET}")
+                    print(f"  {_c240}Blocked: Write, Edit, Bash, NotebookEdit{C.RESET}")
+                    print(f"  {_c240}/approve or /execute → switch to Act mode (Phase 2){C.RESET}")
+                    print(f"  {_c226}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
                     continue
 
-                elif cmd in ("/execute", "/plan-execute"):
+                elif cmd in ("/execute", "/plan-execute", "/approve", "/act"):
                     if not agent._plan_mode:
-                        print(f"{C.YELLOW}Not in plan mode.{C.RESET}")
+                        print(f"{C.YELLOW}Not in plan mode. Use /plan first.{C.RESET}")
                     else:
                         agent._plan_mode = False
-                        print(f"{C.GREEN}Plan mode OFF. All tools re-enabled.{C.RESET}")
+                        # Auto-checkpoint before entering Act mode
+                        if agent.git_checkpoint._is_git_repo:
+                            if agent.git_checkpoint.create("plan-to-act"):
+                                print(f"  {_ansi(chr(27)+'[38;5;87m')}Git checkpoint saved (use /rollback to undo){C.RESET}")
+                        print(f"\n  {_ansi(chr(27)+'[38;5;46m')}━━ Act Mode (Phase 2: Execution) ━━{C.RESET}")
+                        print(f"  {_ansi(chr(27)+'[38;5;46m')}All tools re-enabled. Implementing plan.{C.RESET}")
+                        print(f"  {_ansi(chr(27)+'[38;5;240m')}/plan → return to read-only mode{C.RESET}")
+                        print(f"  {_ansi(chr(27)+'[38;5;240m')}/rollback → undo all changes since plan{C.RESET}")
+                        print(f"  {_ansi(chr(27)+'[38;5;46m')}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
+                    continue
+
+                # ── Git checkpoint & rollback ────────────────────────
+                elif cmd == "/checkpoint":
+                    if not agent.git_checkpoint._is_git_repo:
+                        print(f"{C.YELLOW}Not a git repository. Initialize with: git init{C.RESET}")
+                    else:
+                        if agent.git_checkpoint.create("manual"):
+                            print(f"{C.GREEN}Checkpoint saved. Use /rollback to restore.{C.RESET}")
+                        else:
+                            print(f"{C.YELLOW}No changes to checkpoint.{C.RESET}")
+                    continue
+
+                elif cmd == "/rollback":
+                    ok, msg = agent.git_checkpoint.rollback()
+                    if ok:
+                        print(f"{C.GREEN}{msg}{C.RESET}")
+                    else:
+                        print(f"{C.YELLOW}{msg}{C.RESET}")
+                    continue
+
+                # ── Auto test toggle ─────────────────────────────────
+                elif cmd == "/autotest":
+                    agent.auto_test.enabled = not agent.auto_test.enabled
+                    state = f"{C.GREEN}ON{C.RESET}" if agent.auto_test.enabled else f"{C.RED}OFF{C.RESET}"
+                    print(f"  Auto-test: {state}")
+                    if agent.auto_test.enabled:
+                        if agent.auto_test.test_cmd:
+                            print(f"  {C.DIM}Test command: {agent.auto_test.test_cmd}{C.RESET}")
+                        else:
+                            print(f"  {C.DIM}No test command detected. Tests will only run syntax checks.{C.RESET}")
+                    continue
+
+                # ── Skills list ───────────────────────────────────────
+                elif cmd == "/skills":
+                    loaded_skills = _load_skills(config)
+                    if loaded_skills:
+                        _c51s = _ansi("\033[38;5;51m")
+                        _c87s = _ansi("\033[38;5;87m")
+                        print(f"\n  {_c51s}━━ Loaded Skills ━━━━━━━━━━━━━━━━━━{C.RESET}")
+                        for sname in sorted(loaded_skills.keys()):
+                            lines = len(loaded_skills[sname].split('\n'))
+                            print(f"  {_c87s}{sname}{C.RESET}  ({lines} lines)")
+                        print(f"  {_c51s}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
+                    else:
+                        print(f"{C.YELLOW}No skills loaded.{C.RESET}")
+                        print(f"{C.DIM}Place .md files in ~/.config/vibe-local/skills/ or .vibe-local/skills/{C.RESET}")
                     continue
 
                 elif cmd == "/undo":
@@ -5604,7 +6086,9 @@ def main():
                     _all_cmds = ["/help", "/exit", "/quit", "/clear", "/model", "/models",
                                  "/status", "/save", "/compact", "/yes", "/no",
                                  "/tokens", "/commit", "/diff", "/git", "/plan",
-                                 "/undo", "/init", "/config", "/debug"]
+                                 "/approve", "/act", "/execute", "/undo", "/init",
+                                 "/config", "/debug", "/checkpoint", "/rollback",
+                                 "/autotest", "/skills"]
                     _close = [c for c in _all_cmds if c.startswith(cmd[:3])] if len(cmd) >= 3 else []
                     if not _close:
                         _close = [c for c in _all_cmds if cmd[1:] in c] if len(cmd) > 1 else []
@@ -5641,6 +6125,12 @@ def main():
     if HAS_READLINE:
         try:
             readline.write_history_file(config.history_file)
+        except Exception:
+            pass
+    # Cleanup MCP server subprocesses
+    for mcp in _mcp_clients:
+        try:
+            mcp.stop()
         except Exception:
             pass
     print(f"\n  {_ansi(chr(27)+'[38;5;51m')}✦ Goodbye! ✦{C.RESET}")
