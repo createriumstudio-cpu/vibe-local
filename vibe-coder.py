@@ -54,7 +54,7 @@ _bg_tasks = {}
 _bg_task_counter = [0]
 _bg_tasks_lock = threading.Lock()
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 # ════════════════════════════════════════════════════════════════════════════════
 # ANSI Colors
@@ -410,7 +410,7 @@ class Config:
                     if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copytree(src, dst) if os.path.isdir(src) else shutil.copy2(src, dst)
                 # Write marker to skip migration on future startups
-                with open(migration_marker, "w") as f:
+                with open(migration_marker, "w", encoding="utf-8") as f:
                     f.write("migrated\n")
             except (OSError, shutil.Error):
                 pass  # Best-effort migration
@@ -435,7 +435,7 @@ def _get_ram_gb():
             libc.sysctlbyname(b"hw.memsize", ctypes.byref(mem), ctypes.byref(size), None, 0)
             return mem.value // (1024 ** 3)
         elif platform.system() == "Linux":
-            with open("/proc/meminfo") as f:
+            with open("/proc/meminfo", encoding="utf-8") as f:
                 for line in f:
                     if line.startswith("MemTotal:"):
                         return int(line.split()[1]) // (1024 * 1024)

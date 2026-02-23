@@ -36,7 +36,7 @@
 MacやWindows、LinuxにコマンドをコピペするだけでAIがコードを書いてくれる環境。
 ネットワーク不要・完全無料。Python + Ollama だけで動く完全OSSのコーディングエージェント。
 
-**v0.9.0 (vibe-coder)**: Claude Code CLI不要。Python + Ollama だけでOK。
+**v0.9.1 (vibe-coder)**: Claude Code CLI不要。Python + Ollama だけでOK。
 ```
 vibe-local → vibe-coder.py (OSS) → Ollama (直接通信)
 ```
@@ -218,7 +218,7 @@ AIは かんぺきでは ありません。まちがった コマンドを う�
 A free AI coding environment you can set up with a single command on your Mac, Windows, or Linux.
 No network required. Completely free. Python + Ollama only — a fully open-source coding agent.
 
-**v0.9.0 (vibe-coder)**: No Claude Code CLI needed. Just Python + Ollama.
+**v0.9.1 (vibe-coder)**: No Claude Code CLI needed. Just Python + Ollama.
 ```
 vibe-local → vibe-coder.py (OSS) → Ollama (direct)
 ```
@@ -322,7 +322,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 在Mac、Windows 或 Linux上只需复制粘贴一个命令，AI就能帮你写代码。
 无需网络，完全免费。Python + Ollama 打造的完全开源编程代理。
 
-**v0.9.0 (vibe-coder)**: 不需要 Claude Code CLI。只需 Python + Ollama。
+**v0.9.1 (vibe-coder)**: 不需要 Claude Code CLI。只需 Python + Ollama。
 ```
 vibe-local → vibe-coder.py (开源) → Ollama (直接通信)
 ```
@@ -419,7 +419,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 
 ---
 
-## 🔧 Architecture (v0.9.0 — vibe-coder)
+## 🔧 Architecture (v0.9.1 — vibe-coder)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -466,7 +466,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 
 ### Key difference from v0.2
 
-| | v0.2 (proxy) | v0.9.0 (vibe-coder) |
+| | v0.2 (proxy) | v0.9.1 (vibe-coder) |
 |---|---|---|
 | Engine | Claude Code CLI + proxy.py | vibe-coder.py (direct) |
 | Dependencies | Node.js + Python + Ollama | Python + Ollama only |
@@ -901,7 +901,7 @@ vibe-local is optimized for offline environments:
 
 本ツールの法的性質を透明に説明します：
 
-**本ツールが行うこと（v0.9.0 vibe-coder）：**
+**本ツールが行うこと（v0.9.1 vibe-coder）：**
 - 自作のPythonスクリプト `vibe-coder.py` がコーディングエージェントとして動作します
 - ローカルで動作するOllama（オープンソースのLLMランタイム）と直接通信します
 - 外部サーバーへの通信は一切行いません（Web検索・URLフェッチは任意機能）
@@ -918,11 +918,11 @@ vibe-local is optimized for offline environments:
 - 本ツールは研究・教育目的のユーティリティであり、商用利用を想定していません
 - ローカルLLMはクラウドAIより精度が低いため、意図しない操作のリスクがあります
 
-> **v0.2 以前**: Claude Code CLI + プロキシ方式を使用していました。v0.3.0 で完全自作に移行し、v0.9.0 で500テスト・15ツール・サブエージェント・画像/PDF対応まで到達しました。
+> **v0.2 以前**: Claude Code CLI + プロキシ方式を使用していました。v0.3.0 で完全自作に移行し、v0.9.1 で515テスト・15ツール・サブエージェント・画像/PDF対応まで到達しました。
 
 ### 🇺🇸 Legal Explanation
 
-**What this tool does (v0.9.0 vibe-coder):**
+**What this tool does (v0.9.1 vibe-coder):**
 - Runs `vibe-coder.py`, a fully open-source Python coding agent
 - Communicates directly with Ollama (open-source LLM runtime) running locally
 - No communication with external servers (Web search/fetch are optional features)
@@ -939,7 +939,7 @@ vibe-local is optimized for offline environments:
 - This tool is intended for research and education, not commercial use
 - Local LLMs are less accurate than cloud AI, posing risk of unintended operations
 
-> **v0.2 and earlier**: Used Claude Code CLI + proxy approach. v0.3.0 migrated to fully self-contained. v0.9.0 reached 500 tests, 15 tools, sub-agents, image/PDF support, and AskUserQuestion.
+> **v0.2 and earlier**: Used Claude Code CLI + proxy approach. v0.3.0 migrated to fully self-contained. v0.9.1 reached 515 tests, 15 tools, sub-agents, image/PDF support, and AskUserQuestion.
 
 ---
 
