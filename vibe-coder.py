@@ -237,8 +237,7 @@ class ScrollRegion:
         if self._debug_log is None:
             return
         try:
-            import time as _t
-            ts = _t.strftime("%H:%M:%S")
+            ts = time.strftime("%H:%M:%S")
             # Show escape sequences as readable text
             readable = buf.replace("\033", "ESC")
             self._debug_log.write(f"[{ts}] {label}: {readable!r}\n")
@@ -331,8 +330,12 @@ class ScrollRegion:
             buf += f"\033[{self._rows};1H"               # Move cursor to bottom
             self._log("teardown", buf)
             self._atomic_write(buf)
-            # Preserve status/hint text — they'll be restored on next setup()
-            # and overwritten by update_status() when needed
+            if self._debug_log is not None:
+                try:
+                    self._debug_log.close()
+                except Exception:
+                    pass
+                self._debug_log = None
 
     def resize(self):
         """Handle terminal resize (SIGWINCH).
@@ -628,10 +631,8 @@ class InputMonitor:
                             except (OSError, ValueError):
                                 r3 = []
                             if r3:
-                                ch3 = os.read(fd, 1)  # noqa: F841
-                                # Escape sequence (e.g. arrow keys) — treat as ESC (interrupt)
-                            # '[' with no follow-up — treat as ESC
-                        # Non-'[' after ESC — treat as ESC
+                                os.read(fd, 1)  # consume sequence byte
+                            # Any ESC sequence → treat as interrupt
                     self._pressed.set()
                     break
                 elif ch == b'\x03':  # Ctrl+C
@@ -5390,7 +5391,7 @@ class TUI:
             _c226 = _ansi(chr(27) + '[38;5;226m')
             _c240 = _ansi("\033[38;5;240m")
             lbl = f" PLAN MODE "
-            pad = sep_w - len(lbl) - 4
+            pad = max(0, sep_w - len(lbl) - 4)
             left = pad // 2
             right = pad - left
             print(f"{_c226}{'─' * left}{lbl}{'─' * right}  {_c240}/approve: Act mode{C.RESET}")
@@ -5444,10 +5445,6 @@ class TUI:
         prefill: pre-populate the input line with type-ahead text.
         """
         self.show_input_separator(plan_mode=plan_mode)
-        # Keep DECSTBM active during input — footer stays visible.
-        # Input/readline works within the scroll region (rows 1..scroll_end).
-        _sr = self.scroll_region
-        _sr_was_active = _sr._active
 
         try:
             first_line = self.get_input(session=session, plan_mode=plan_mode, prefill=prefill)
@@ -6672,12 +6669,12 @@ def _enter_plan_mode(agent, session):
     # Banner
     _c226 = _ansi(chr(27) + '[38;5;226m')
     _c240 = _ansi(chr(27) + '[38;5;240m')
-    print(f"\n  {_c226}━━ Plan Mode ━━━━━━━━━━━━━━━━━━━━━━{C.RESET}")
-    print(f"  {_c226}Read-only exploration + plan writing.{C.RESET}")
-    print(f"  {_c240}Write restricted to: .vibe-local/plans/{C.RESET}")
-    print(f"  {_c240}Plan file: {plan_name}{C.RESET}")
-    print(f"  {_c240}/approve → Act mode{C.RESET}")
-    print(f"  {_c226}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
+    _scroll_aware_print(f"\n  {_c226}━━ Plan Mode ━━━━━━━━━━━━━━━━━━━━━━{C.RESET}")
+    _scroll_aware_print(f"  {_c226}Read-only exploration + plan writing.{C.RESET}")
+    _scroll_aware_print(f"  {_c240}Write restricted to: .vibe-local/plans/{C.RESET}")
+    _scroll_aware_print(f"  {_c240}Plan file: {plan_name}{C.RESET}")
+    _scroll_aware_print(f"  {_c240}/approve → Act mode{C.RESET}")
+    _scroll_aware_print(f"  {_c226}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
 
 
 def _read_latest_plan(agent):
@@ -6735,13 +6732,13 @@ def _exit_plan_mode(agent, session):
     _c46 = _ansi(chr(27) + '[38;5;46m')
     _c240 = _ansi(chr(27) + '[38;5;240m')
     plan_name = os.path.basename(agent._active_plan_path) if agent._active_plan_path else "(none)"
-    print(f"\n  {_c46}━━ Act Mode ━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}")
-    print(f"  {_c46}All tools re-enabled. Implementing plan.{C.RESET}")
+    _scroll_aware_print(f"\n  {_c46}━━ Act Mode ━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}")
+    _scroll_aware_print(f"  {_c46}All tools re-enabled. Implementing plan.{C.RESET}")
     if plan_content:
-        print(f"  {_c240}Plan loaded: {plan_name} ({len(plan_content)} chars){C.RESET}")
-    print(f"  {_c240}/plan → return to Plan mode{C.RESET}")
-    print(f"  {_c240}/rollback → undo all changes since plan{C.RESET}")
-    print(f"  {_c46}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
+        _scroll_aware_print(f"  {_c240}Plan loaded: {plan_name} ({len(plan_content)} chars){C.RESET}")
+    _scroll_aware_print(f"  {_c240}/plan → return to Plan mode{C.RESET}")
+    _scroll_aware_print(f"  {_c240}/rollback → undo all changes since plan{C.RESET}")
+    _scroll_aware_print(f"  {_c46}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{C.RESET}\n")
 
 
 def main():

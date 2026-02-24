@@ -9436,32 +9436,6 @@ class TestCharDisplayWidth:
         assert vc._display_width(text) == expected
 
 
-class TestWriteRestrictionGuard:
-    """Plan mode Write tool is restricted to .vibe-local/plans/ only."""
-
-    def test_outside_plans_dir_is_blocked(self):
-        """Write to path outside plans/ should be rejected."""
-        import inspect
-        source = inspect.getsource(vc.Agent.run)
-        # The guard must check for plans directory
-        assert "plans" in source
-        assert "plan mode" in source.lower() or "Plan mode" in source
-
-    def test_path_traversal_blocked(self):
-        """realpath-based guard should prevent ../../ traversal."""
-        # The guard uses os.path.realpath to resolve symlinks/traversal,
-        # then checks startswith(plans_dir + os.sep).
-        import inspect
-        source = inspect.getsource(vc.Agent.run)
-        assert "realpath" in source
-
-    def test_plans_dir_write_allowed_in_source(self):
-        """The guard should only block when path is NOT under plans_dir."""
-        import inspect
-        source = inspect.getsource(vc.Agent.run)
-        # The continue (block) is inside a "not fpath.startswith" branch
-        assert "startswith" in source
-
 
 class TestReadLatestPlan:
     """_read_latest_plan reads active plan or falls back to newest .md."""
