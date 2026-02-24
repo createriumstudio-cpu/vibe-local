@@ -37,10 +37,10 @@ MacやWindows、LinuxにコマンドをコピペするだけでAIがコードを
 **エージェントのコア `vibe-coder.py` は Python 標準ライブラリだけで書かれた単一ファイルです。** pip install 不要、外部パッケージ依存ゼロ。ソースコードはそのまま読めるため、AIコーディングエージェントの仕組みを学ぶ教材としても、研究のベースラインとしても使えます。すべてがオープンソース (MIT) で公開されています。
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6900行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~7400行) → Ollama (直接通信)
 ```
 
-ログイン不要・Node.js不要・プロキシプロセス不要。16個の内蔵ツール、サブエージェント、並列エージェント、ファイル監視、画像・PDF読み取り対応。MCP連携・スキルシステム・Plan/Actモード・Gitチェックポイント・自動テスト搭載。703テスト。
+ログイン不要・Node.js不要・プロキシプロセス不要。16個の内蔵ツール、サブエージェント、並列エージェント、ファイル監視、画像・PDF読み取り対応。MCP連携・スキルシステム・Plan/Actモード・Gitチェックポイント・自動テスト・固定フッター(DECSTBM)搭載。787テスト。
 
 ### インストール (3ステップ)
 
@@ -126,6 +126,24 @@ nano ~/.config/vibe-local/config
 VIBE_LOCAL_DEBUG=1 vibe-local
 ```
 
+**フッター（ステータス行）が崩れる**
+```bash
+# スクロール領域を無効にする
+VIBE_NO_SCROLL=1 vibe-local
+```
+
+**ターミナル描画のデバッグ**
+```bash
+# エスケープシーケンスをログに記録
+VIBE_DEBUG_TUI=1 vibe-local
+# ログ: ~/.vibe-tui-debug.log
+```
+
+**対話中にスクロール領域を診断**
+```
+> /debug-scroll
+```
+
 </details>
 
 ---
@@ -189,8 +207,10 @@ vibe-local -p "Pythonで じゃんけんゲームを つくって"
 | `/autotest` | じどう テスト ON/OFF |
 | `/watch` | ファイルの へんこうを みはる ON/OFF |
 | `/yes` | じどう きょか モード オン |
+| `/debug-scroll` | がめんの スクロールを テストする |
 | `"""` | ながい ぶんしょうを にゅうりょく する |
 | `Ctrl+C` | とめる / おわる |
+| `ESC` | AIの こたえを とめる |
 
 ### きをつけること
 
@@ -226,10 +246,10 @@ No network required. Completely free. **Python + Ollama only** — a fully open-
 **The core agent `vibe-coder.py` is a single file written entirely with the Python standard library.** No pip install needed. Zero external dependencies. The source code is human-readable as-is, making it ideal as teaching material for understanding how AI coding agents work, or as a research baseline. Everything is open source (MIT).
 
 ```
-vibe-local → vibe-coder.py (OSS, Python stdlib only, ~6900 lines) → Ollama (direct)
+vibe-local → vibe-coder.py (OSS, Python stdlib only, ~7400 lines) → Ollama (direct)
 ```
 
-No login. No Node.js. No proxy process. 16 built-in tools, sub-agents, parallel agents, file watcher, image/PDF reading. MCP integration, Skills system, Plan/Act mode, Git checkpoints, auto-test loop. 715 tests.
+No login. No Node.js. No proxy process. 16 built-in tools, sub-agents, parallel agents, file watcher, image/PDF reading. MCP integration, Skills system, Plan/Act mode, Git checkpoints, auto-test loop, fixed footer (DECSTBM). 787 tests.
 
 ### Install (3 steps)
 
@@ -315,6 +335,24 @@ nano ~/.config/vibe-local/config
 VIBE_LOCAL_DEBUG=1 vibe-local
 ```
 
+**Footer (status bar) is garbled**
+```bash
+# Disable scroll region
+VIBE_NO_SCROLL=1 vibe-local
+```
+
+**Debug terminal rendering**
+```bash
+# Log escape sequences to file
+VIBE_DEBUG_TUI=1 vibe-local
+# Log: ~/.vibe-tui-debug.log
+```
+
+**Diagnose scroll region interactively**
+```
+> /debug-scroll
+```
+
 </details>
 
 ---
@@ -329,10 +367,10 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 **核心代理 `vibe-coder.py` 是仅使用 Python 标准库编写的单一文件。** 无需 pip install，零外部依赖。源代码直接可读，非常适合作为学习AI编程代理工作原理的教材或研究基线。一切以开源 (MIT) 形式公开。
 
 ```
-vibe-local → vibe-coder.py (开源, 纯Python标准库, ~6900行) → Ollama (直接通信)
+vibe-local → vibe-coder.py (开源, 纯Python标准库, ~7400行) → Ollama (直接通信)
 ```
 
-无需登录、无需Node.js、无需代理进程。16个内置工具、子代理、并行代理、文件监视、图像/PDF读取支持。MCP集成、技能系统、Plan/Act模式、Git检查点、自动测试循环。652项测试。
+无需登录、无需Node.js、无需代理进程。16个内置工具、子代理、并行代理、文件监视、图像/PDF读取支持。MCP集成、技能系统、Plan/Act模式、Git检查点、自动测试循环、固定页脚(DECSTBM)。787项测试。
 
 ### 安装（3步）
 
@@ -418,6 +456,24 @@ nano ~/.config/vibe-local/config
 VIBE_LOCAL_DEBUG=1 vibe-local
 ```
 
+**页脚（状态栏）显示异常**
+```bash
+# 禁用滚动区域
+VIBE_NO_SCROLL=1 vibe-local
+```
+
+**调试终端渲染**
+```bash
+# 将转义序列记录到文件
+VIBE_DEBUG_TUI=1 vibe-local
+# 日志: ~/.vibe-tui-debug.log
+```
+
+**交互式诊断滚动区域**
+```
+> /debug-scroll
+```
+
 </details>
 
 ---
@@ -434,7 +490,7 @@ VIBE_LOCAL_DEBUG=1 vibe-local
                          │
                          ▼
 ┌────────────────────────────────────────────────────────────┐
-│  vibe-coder.py  (single file, Python stdlib only, ~6900L)  │
+│  vibe-coder.py  (single file, Python stdlib only, ~7400L)  │
 │                                                            │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  Agent Loop (parallel tool execution)                │  │
@@ -459,6 +515,12 @@ VIBE_LOCAL_DEBUG=1 vibe-local
 │  │  File Watcher (poll-based change detection)          │  │
 │  │  Parallel Agents (multi-task concurrent execution)   │  │
 │  │  Streaming Enhancement (tool call delta accumulation)│  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │  v1.3 Extensions                                    │  │
+│  │  ScrollRegion (DECSTBM fixed footer, store-only)    │  │
+│  │  ESC Interrupt (immediate generation stop)           │  │
+│  │  Type-Ahead Input (buffered during response)         │  │
+│  │  Debug Logging (VIBE_DEBUG_TUI=1 → log file)        │  │
 │  ├──────────────────────────────────────────────────────┤  │
 │  │  System Prompt + OS-Specific Hints                   │  │
 │  │  macOS: brew, /Users/, system_profiler               │  │
@@ -568,8 +630,10 @@ There are many excellent open-source projects in the AI coding agent space. Each
 | `/skills` | List loaded skills | スキル一覧 | 列出已加载技能 |
 | `/init` | Create CLAUDE.md | CLAUDE.md作成 | 创建CLAUDE.md |
 | `/yes` | Enable auto-approve | 自動許可ON | 启用自动批准 |
+| `/debug-scroll` | Diagnose scroll region | スクロール診断 | 诊断滚动区域 |
 | `exit`, `quit`, `bye` | Exit (no `/` needed) | 終了 | 退出 |
 | `"""` | Multi-line input | 複数行入力 | 多行输入 |
+| `ESC` | Stop AI response | AI応答停止 | 停止AI响应 |
 | `Ctrl+C` | Stop (double-tap to exit) | 停止（2回で終了） | 停止（连按退出） |
 
 ---
@@ -662,6 +726,8 @@ Priority: CLI flags > Environment variables > Config file > Defaults
 | `VIBE_CODER_SIDECAR` | Override sidecar model |
 | `VIBE_LOCAL_SIDECAR_MODEL` | Sidecar model (set by launcher) |
 | `VIBE_CODER_DEBUG` / `VIBE_LOCAL_DEBUG` | Set to `1` for debug logging |
+| `VIBE_DEBUG_TUI` | Set to `1` to log escape sequences to `~/.vibe-tui-debug.log` |
+| `VIBE_NO_SCROLL` | Set to `1` to disable DECSTBM scroll region (fallback mode) |
 
 ---
 
@@ -764,6 +830,46 @@ Infrastructure for streaming tool call responses from Ollama:
 
 ---
 
+## v1.3 Features / v1.3 新機能
+
+### Fixed Footer (DECSTBM Scroll Region) / 固定フッター
+
+Terminal uses VT100 DECSTBM to pin a 3-row footer (separator, status, hints) at the bottom while AI output scrolls above.
+
+ターミナルのVT100 DECSTBM機能で、下部3行（セパレータ、ステータス、ヒント）を固定表示。AI出力は上部でスクロール。
+
+```
+┌─────────────────────────────────────┐
+│  AI output scrolls here             │  ← Scroll region
+│  ...                                │
+├─────────────────────────────────────┤  ← Separator
+│  ✦ Ready                            │  ← Status line
+│  /help ∙ """ multi-line ∙ Ctrl+C    │  ← Hint bar
+└─────────────────────────────────────┘
+```
+
+- **Store-only pattern**: `update_status()` / `update_hint()` only store text. Footer drawn atomically during `setup()` and `resize()`.
+- **Thread-safe**: Non-blocking lock in `resize()` prevents SIGWINCH deadlock. All state checks inside lock.
+- **Fallback**: `VIBE_NO_SCROLL=1` disables scroll region for incompatible terminals.
+- **Debug**: `VIBE_DEBUG_TUI=1` logs all escape sequences to `~/.vibe-tui-debug.log`.
+- **Diagnostic**: `/debug-scroll` command tests DECSTBM behavior interactively.
+
+フォールバック: `VIBE_NO_SCROLL=1` でスクロール領域無効化。`VIBE_DEBUG_TUI=1` でエスケープシーケンスをログ出力。
+
+### ESC Interrupt / ESCキー割り込み
+
+Press `ESC` during AI response to stop generation immediately. Faster than `Ctrl+C`.
+
+AI応答中に `ESC` キーで即座に生成停止。`Ctrl+C` より高速。
+
+### Type-Ahead Input / 先行入力
+
+Start typing while the AI is still responding. Input is buffered and ready when the prompt appears.
+
+AI応答中に次のプロンプトを入力開始可能。入力はバッファされ、プロンプト表示時にそのまま利用。
+
+---
+
 ## Security
 
 > **Use this tool at your own risk. Pay attention to the commands the AI executes.**
@@ -849,6 +955,7 @@ vibe-local -p "Write Hello World in Python"
 | Skills system | Yes | |
 | File watcher | Yes | |
 | Parallel agents | Yes | |
+| Fixed footer (DECSTBM) | Yes | VIBE_NO_SCROLL=1 to disable |
 | Web search | Online only | DuckDuckGo |
 | URL fetch | Online only | |
 | Package install | Online only | pip/brew/winget |
