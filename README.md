@@ -1,3 +1,6 @@
+> **Note:** これはochyai/vibe-localのフォークです。カスタマイズ版として運用しています。
+> オリジナル: https://github.com/ochyai/vibe-local
+
 # vibe-local
 
 ```
